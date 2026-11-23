@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ekollof.blockwatch",
+  "name": "Blockwatch",
+  "version": "0.1.0",
+  "author": "Emiel Kollof <emiel@kollof.nl>",
+  "license": "MIT",
+  "description": "Read-only watch of crypto addresses for new incoming and outgoing transactions, with desktop notifications.",
+  "kinds": [
+    "bar-widget",
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "service": "service.qml"
+  },
+  "barWidget": {
+    "displayName": "Blockwatch",
+    "description": "Watch BTC, LTC, DOGE, ETH, SOL and XMR addresses for credit and debit activity",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 120,
+      "notify": true
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Check interval (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 120
+      },
+      {
+        "key": "notify",
+        "type": "boolean",
+        "label": "Notify on new transactions",
+        "defaultValue": true
+      }
+    ]
+  }
+}

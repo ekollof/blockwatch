@@ -1,0 +1,81 @@
+{
+  "tooltip.loading": "Blockwatch — loading",
+  "tooltip.idle": "Blockwatch — no addresses watched",
+  "tooltip.error": "Blockwatch — the last check failed",
+  "tooltip.watching": {
+    "one": "Blockwatch — %1 address watched",
+    "other": "Blockwatch — %1 addresses watched"
+  },
+  "tooltip.unread": {
+    "one": "Blockwatch — %1 new event",
+    "other": "Blockwatch — %1 new events"
+  },
+  "popup.title": "Blockwatch",
+  "popup.loading": "Loading…",
+  "popup.watching": {
+    "one": "%1 address",
+    "other": "%1 addresses"
+  },
+  "popup.checking": "checking…",
+  "popup.checked": "checked %1",
+  "popup.neverChecked": "not checked yet",
+  "popup.errors": {
+    "one": "%1 address has an error",
+    "other": "%1 addresses have errors"
+  },
+  "popup.refresh": "Check now",
+  "popup.emptyTitle": "No addresses watched",
+  "popup.emptyBody": "Add a public address to watch for credit and debit activity. Blockwatch never holds a key that can spend.",
+  "popup.add": "Watch an address",
+  "popup.cancel": "Cancel",
+  "popup.edit": "Edit watch",
+  "popup.editTitle": "EDIT WATCH",
+  "popup.save": "Save changes",
+  "popup.saving": "Saving…",
+  "popup.chain": "CHAIN",
+  "popup.label": "Label (optional)",
+  "popup.address": "Address",
+  "popup.server": "SERVER",
+  "popup.serverCustom": "Custom server…",
+  "popup.customServerHint": "A custom server is remembered for next time when you save this watch.",
+  "popup.serverHint": "Only a light-wallet server can watch an XMR address. Public monerod nodes (xmr-node.cakewallet.com:18081, node.monerodevs.org:18089) are the daemon behind monero-wallet-rpc, not this field.",
+  "popup.endpointMissing": "Enter the custom light-wallet or RPC server URL.",
+  "popup.viewKeyKeep": "Leave blank to keep the stored view key.",
+  "popup.modeLws": "Light wallet server",
+  "popup.modeRpc": "monero-wallet-rpc",
+  "popup.viewKey": "Private view key",
+  "popup.viewKeyHint": "Monero needs its private view key. It is sent only to the light wallet server you configure, and it cannot spend. Never paste a seed or spend key.",
+  "popup.rpcHint": "monero-wallet-rpc watches a view-only wallet on your machine. Start it with a public monerod such as xmr-node.cakewallet.com:18081 or node.monerodevs.org:18089.",
+  "popup.addAction": "Watch",
+  "popup.adding": "Adding…",
+  "popup.remove": "Stop watching",
+  "popup.received": "received",
+  "popup.baseline": "baseline recorded; new activity will notify",
+  "popup.lastEvent": "last event %1",
+  "popup.addressMissing": "Enter an address to watch.",
+  "popup.viewKeyMissing": "Monero needs the private view key, or choose monero-wallet-rpc.",
+  "popup.footer": "Read-only: no spend key, no signing, no transactions sent.",
+  "notification.title": "Blockwatch · %1",
+  "notification.received": "%1 received %2 %3",
+  "notification.sent": "%1 sent %2 %3",
+  "notification.self": "%1 moved %2 %3 between own addresses",
+  "notification.balance": "%1 balance changed by %2 %3",
+  "notification.activity": "%1 has new activity",
+  "notification.more": {
+    "one": "%1 more new event",
+    "other": "%1 more new events"
+  },
+  "time.now": "just now",
+  "time.minutes": {
+    "one": "%1 minute ago",
+    "other": "%1 minutes ago"
+  },
+  "time.hours": {
+    "one": "%1 hour ago",
+    "other": "%1 hours ago"
+  },
+  "time.days": {
+    "one": "%1 day ago",
+    "other": "%1 days ago"
+  }
+}

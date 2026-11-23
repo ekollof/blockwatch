@@ -1,0 +1,176 @@
+{
+  "ok": true,
+  "version": 1,
+  "durationMs": 42,
+  "warning": null,
+  "checkedAt": "2026-11-23T12:00:00Z",
+  "addresses": [
+    {
+      "id": "btc:bc1qntv7u26zgs8m042js4etmndpewzlywxr4pea0v",
+      "chain": "btc",
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "label": "Cold vault",
+      "address": "bc1qntv7u26zgs8m042js4etmndpewzlywxr4pea0v",
+      "mode": null,
+      "endpoint": null,
+      "hasViewKey": false,
+      "balance": "1.8421",
+      "balanceRaw": "184210000",
+      "balanceLabel": "balance",
+      "status": "ok",
+      "error": null,
+      "note": "cold storage · self-custody",
+      "initialized": false,
+      "registered": null,
+      "newEvents": [],
+      "truncated": 0
+    },
+    {
+      "id": "eth:0xf67ca8980aab6ae4bc13d2a43a6ada270691286d",
+      "chain": "eth",
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "label": "Treasury",
+      "address": "0xf67ca8980aab6ae4bc13d2a43a6ada270691286d",
+      "mode": null,
+      "endpoint": null,
+      "hasViewKey": false,
+      "balance": "12.4095",
+      "balanceRaw": "12409500000000000000",
+      "balanceLabel": "balance",
+      "status": "ok",
+      "error": null,
+      "note": "native ETH transfers only",
+      "initialized": false,
+      "registered": null,
+      "newEvents": [],
+      "truncated": 0
+    },
+    {
+      "id": "sol:grsdZ8zj8RzuUiEeK2qKrTcd9CdJBxjVbxxAhHPzeFpY",
+      "chain": "sol",
+      "name": "Solana",
+      "symbol": "SOL",
+      "label": "Trading",
+      "address": "grsdZ8zj8RzuUiEeK2qKrTcd9CdJBxjVbxxAhHPzeFpY",
+      "mode": null,
+      "endpoint": null,
+      "hasViewKey": false,
+      "balance": "842.5",
+      "balanceRaw": "842500000000",
+      "balanceLabel": "balance",
+      "status": "ok",
+      "error": null,
+      "note": "balance delta is shown for new activity",
+      "initialized": false,
+      "registered": null,
+      "newEvents": [],
+      "truncated": 0
+    },
+    {
+      "id": "xmr:4qdziYBCuc6bwRRpC2i57UiJo8kt4KNWjM34qJ4XuxqdGDvzoXe8ohMtTSaQyeiyTSo4bZvhaHLL94NkSYksnFJ1tUxWhZq",
+      "chain": "xmr",
+      "name": "Monero",
+      "symbol": "XMR",
+      "label": "Donations",
+      "address": "4qdziYBCuc6bwRRpC2i57UiJo8kt4KNWjM34qJ4XuxqdGDvzoXe8ohMtTSaQyeiyTSo4bZvhaHLL94NkSYksnFJ1tUxWhZq",
+      "mode": "lws",
+      "endpoint": "https://lws.monero.fail",
+      "hasViewKey": true,
+      "balance": "18.42",
+      "balanceRaw": "18420000000000",
+      "balanceLabel": "received",
+      "status": "ok",
+      "error": null,
+      "note": "view key cannot prove outgoing spends",
+      "initialized": false,
+      "registered": true,
+      "newEvents": [],
+      "truncated": 0
+    }
+  ],
+  "events": [],
+  "errors": [],
+  "servers": [
+    {
+      "id": "lws-monero-fail",
+      "label": "lws.monero.fail",
+      "endpoint": "https://lws.monero.fail",
+      "mode": "lws",
+      "note": "Community light wallet server; wallet registration is required",
+      "custom": false
+    },
+    {
+      "id": "wallet-rpc-local",
+      "label": "Local monero-wallet-rpc",
+      "endpoint": "http://127.0.0.1:18083/json_rpc",
+      "mode": "wallet-rpc",
+      "note": "View-only wallet RPC on this machine",
+      "custom": false
+    },
+    {
+      "id": "https://lws.example.org",
+      "label": "Home LWS",
+      "endpoint": "https://lws.example.org",
+      "mode": "lws",
+      "custom": true
+    }
+  ],
+  "chains": [
+    {
+      "id": "btc",
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "decimals": 8,
+      "needsViewKey": false,
+      "note": "Public transactions; no key needed.",
+      "endpoint": "https://mempool.space"
+    },
+    {
+      "id": "ltc",
+      "name": "Litecoin",
+      "symbol": "LTC",
+      "decimals": 8,
+      "needsViewKey": false,
+      "note": "Public transactions; no key needed.",
+      "endpoint": "https://litecoinspace.org"
+    },
+    {
+      "id": "doge",
+      "name": "Dogecoin",
+      "symbol": "DOGE",
+      "decimals": 8,
+      "needsViewKey": false,
+      "note": "Public transactions; no key needed.",
+      "endpoint": "https://api.blockcypher.com/v1/doge/main"
+    },
+    {
+      "id": "eth",
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "decimals": 18,
+      "needsViewKey": false,
+      "note": "Native ETH transfers; tokens are not followed.",
+      "endpoint": "https://eth.blockscout.com"
+    },
+    {
+      "id": "sol",
+      "name": "Solana",
+      "symbol": "SOL",
+      "decimals": 9,
+      "needsViewKey": false,
+      "note": "Public signatures and balance; no key needed.",
+      "endpoint": "https://api.mainnet-beta.solana.com"
+    },
+    {
+      "id": "xmr",
+      "name": "Monero",
+      "symbol": "XMR",
+      "decimals": 12,
+      "needsViewKey": true,
+      "note": "Monero hides addresses; watching needs the private view key.",
+      "endpoint": "https://lws.monero.fail"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+#!/usr/bin/python3
+"""Blockwatch helper: read-only crypto address watcher.
+
+Run `blockwatch --help` for the commands. The bar starts this file with an
+argv vector and a deadline through omakit's Run block; nothing here is a
+shell string, and nothing here can sign or broadcast a transaction.
+"""
+
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "lib"))
+sys.dont_write_bytecode = True
+
+from blockwatch.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,225 @@
+"""Small, dependency-free helpers shared by the Blockwatch helper.
+
+Everything here is deliberately narrow: parse an untrusted JSON document,
+validate a URL, format an atomic amount, or turn a timestamp into ISO UTC.
+Network access itself lives in :mod:`blockwatch.http`.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+
+MAX_TEXT = 200
+
+
+class BlockwatchError(Exception):
+    """A failure that should be reported to the user, not a traceback."""
+
+
+class ValidationError(BlockwatchError):
+    pass
+
+
+def require_dict(value, what):
+    if not isinstance(value, dict):
+        raise ValidationError(f"{what} is not a JSON object")
+    return value
+
+
+def require_list(value, what, limit=500):
+    if not isinstance(value, list):
+        raise ValidationError(f"{what} is not a JSON array")
+    if len(value) > limit:
+        raise ValidationError(f"{what} has more than {limit} entries")
+    return value
+
+
+def text(value, what, limit=MAX_TEXT, allow_empty=False):
+    """A display string from untrusted data: bounded, no control characters."""
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise ValidationError(f"{what} is not a string")
+    cleaned = "".join(ch for ch in value if ch >= " " and ch != "\x7f"
+                      and not (0x80 <= ord(ch) <= 0x9F)
+                      and not _is_bidi_control(ch)).strip()
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit]
+    if not cleaned and not allow_empty:
+        raise ValidationError(f"{what} is empty")
+    return cleaned
+
+
+def _is_bidi_control(ch):
+    code = ord(ch)
+    return (0x202A <= code <= 0x202E or 0x2066 <= code <= 0x2069
+            or code in (0x200E, 0x200F))
+
+
+def plain(value, limit=MAX_TEXT):
+    """Display text without raising: bounded, control and bidi controls gone."""
+    if value is None:
+        return ""
+    text_value = str(value)
+    return "".join(ch for ch in text_value if ch >= " " and ch != "\x7f"
+                   and not (0x80 <= ord(ch) <= 0x9F)
+                   and not _is_bidi_control(ch)).strip()[:limit]
+
+
+def digit_string(value, what, limit=80):
+    """A non-negative integer amount, kept as a decimal string."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValidationError(f"{what} is not an integer")
+    rendered = str(value)
+    if not rendered or len(rendered) > limit or not rendered.isdigit():
+        raise ValidationError(f"{what} is not a non-negative integer")
+    return rendered
+
+
+def int_value(value, what, minimum=0, maximum=10**30):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValidationError(f"{what} is not an integer")
+    if value < minimum or value > maximum:
+        raise ValidationError(f"{what} is out of range")
+    return value
+
+
+def bool_value(value, what):
+    if not isinstance(value, bool):
+        raise ValidationError(f"{what} is not a boolean")
+    return value
+
+
+def format_units(raw, decimals):
+    """Atomic units to a plain decimal string, trailing zeros trimmed."""
+    raw = digit_string(raw, "amount")
+    try:
+        amount = Decimal(raw) / (Decimal(10) ** int(decimals))
+    except (InvalidOperation, ValueError) as error:
+        raise ValidationError("amount cannot be formatted") from error
+    rendered = format(amount, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return rendered or "0"
+
+
+def format_delta(raw, decimals):
+    """Like :func:`format_units`, but keeps a sign for balance deltas."""
+    raw = str(raw)
+    sign = ""
+    if raw.startswith("-"):
+        sign, raw = "-", raw[1:]
+    return sign + format_units(raw, decimals)
+
+
+def iso_utc(epoch):
+    if epoch is None:
+        return None
+    if isinstance(epoch, bool) or not isinstance(epoch, (int, float)):
+        raise ValidationError("timestamp is not a number")
+    if epoch <= 0 or epoch > 253402300799:
+        return None
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def iso_from_string(value):
+    if not isinstance(value, str) or not value:
+        return None
+    cleaned = value.strip()
+    if cleaned.endswith("Z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def short_hash(value, length=12):
+    value = str(value or "")
+    return value[:length] + "…" if len(value) > length else value
+
+
+def address_key(chain, address):
+    """Stable id for one watched address across config and state."""
+    return f"{chain}:{address.strip().lower() if chain in ('eth', 'sol') else address.strip()}"
+
+
+def clean_label(value, fallback=""):
+    if value is None or value == "":
+        return fallback
+    return text(value, "label", limit=80)
+
+
+def dedupe(items):
+    seen = set()
+    out = []
+    for item in items:
+        key = item.get("id") if isinstance(item, dict) else item
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+# -- address validation -----------------------------------------------------
+#
+# These are sanity checks against a typo being sent to a provider, not a
+# replacement for the provider's own validation. Full checksum validation
+# would mean vendoring base58/bech32/EIP-55 implementations; the read-only
+# call that follows is authoritative and returns a clear error.
+
+_BASE58 = re.compile(r"^[1-9A-HJ-NP-Za-km-z]+$")
+_BECH32 = re.compile(r"^(bc1|ltc1|tb1)[02-9ac-hj-np-z]{6,87}$")
+_ETH = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_XMR = re.compile(r"^[48][1-9A-HJ-NP-Za-km-z]{94}$")
+_VIEW_KEY = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def validate_address(chain, address):
+    address = text(address, "address", limit=200)
+    if chain == "btc":
+        if _BECH32.match(address.lower()):
+            return address
+        if 26 <= len(address) <= 35 and _BASE58.match(address):
+            return address
+        raise ValidationError("not a Bitcoin address")
+    if chain == "ltc":
+        if _BECH32.match(address.lower()):
+            return address
+        if 26 <= len(address) <= 35 and _BASE58.match(address):
+            return address
+        raise ValidationError("not a Litecoin address")
+    if chain == "doge":
+        if 26 <= len(address) <= 35 and _BASE58.match(address) and address[0] in "9AD":
+            return address
+        raise ValidationError("not a Dogecoin address")
+    if chain == "eth":
+        if _ETH.match(address):
+            return address
+        raise ValidationError("not an Ethereum address (0x followed by 40 hex characters)")
+    if chain == "sol":
+        if 32 <= len(address) <= 44 and _BASE58.match(address):
+            return address
+        raise ValidationError("not a Solana address")
+    if chain == "xmr":
+        if _XMR.match(address):
+            return address
+        raise ValidationError("not a Monero mainnet address")
+    raise ValidationError(f"unsupported chain {chain}")
+
+
+def validate_view_key(value):
+    value = text(value, "view key", limit=64)
+    if not _VIEW_KEY.match(value):
+        raise ValidationError("the Monero private view key must be 64 hex characters")
+    return value.lower()
+
+
+def validate_label(value):
+    return clean_label(value)

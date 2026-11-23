@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Deterministic Blockwatch demo: serve demo/fixtures/report.json through the
+# installed plugin's helper, open the panel on an empty monitor, capture it,
+# then restore the real helper and desktop state.
+#
+#   demo/run
+#
+# Environment overrides:
+#   DEMO_SCREEN=HDMI-A-1   monitor to use (must be empty)
+#   DEMO_OUT=...           capture path
+#   DEMO_HEIGHT=620        capture height
+#   DEMO_REGION=x,y WxH    explicit grim geometry (skips geometry lookup)
+#   DEMO_ALLOW_OUTSIDE=1   allow running outside a Herdr pane
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLUGIN_ID="io.github.ekollof.blockwatch"
+PLUGIN_DIR="${PLUGIN_DIR:-$HOME/.config/omarchy/plugins/$PLUGIN_ID}"
+SCREEN="${DEMO_SCREEN:-HDMI-A-1}"
+OUT="${DEMO_OUT:-$REPO_DIR/demo/screenshot-full.png}"
+HEIGHT="${DEMO_HEIGHT:-620}"
+RUNTIME_DIR=""
+RESTORE_OK=0
+FOCUS_BEFORE=""
+CURSOR_X=0
+CURSOR_Y=0
+MARKER=/tmp/blockwatch-demo-served
+
+die() { printf 'demo: %s\n' "$*" >&2; exit 1; }
+
+if [[ "${HERDR_ENV:-}" != "1" && "${DEMO_ALLOW_OUTSIDE:-0}" != "1" ]]; then
+  die "run this from a Herdr pane, or set DEMO_ALLOW_OUTSIDE=1"
+fi
+for command in omarchy-shell omarchy hyprctl grim jq python3; do
+  command -v "$command" >/dev/null || die "missing command: $command"
+done
+[[ -f "$PLUGIN_DIR/manifest.json" ]] || die "plugin not installed at $PLUGIN_DIR"
+[[ -x "$PLUGIN_DIR/bin/blockwatch" ]] || die "plugin helper is missing"
+omarchy plugin list --json | jq -e --arg id "$PLUGIN_ID" \
+  '.[] | select(.id == $id) | .enabled == true' >/dev/null \
+  || die "plugin is not enabled"
+
+MONITOR_INDEX="$(hyprctl monitors -j | jq --arg s "$SCREEN" 'map(.name) | index($s)')"
+[[ "$MONITOR_INDEX" != "null" ]] || die "monitor not found: $SCREEN"
+ACTIVE_WS="$(hyprctl monitors -j | jq --arg s "$SCREEN" \
+  '.[] | select(.name == $s) | .activeWorkspace.id')"
+CLIENTS="$(hyprctl clients -j | jq --argjson m "$MONITOR_INDEX" --argjson ws "$ACTIVE_WS" \
+  '[.[] | select(.monitor == $m and .workspace.id == $ws)] | length')"
+if [[ "$CLIENTS" != "0" && "${DEMO_ALLOW_DIRTY_SCREEN:-0}" != "1" ]]; then
+  die "monitor $SCREEN is not empty ($CLIENTS clients); use an empty one"
+fi
+if [[ -e "$MARKER" ]]; then
+  die "stale demo marker exists: $MARKER"
+fi
+[[ -f "$REPO_DIR/demo/fixtures/helper.py" ]] || die "fixture helper missing"
+[[ -f "$REPO_DIR/demo/fixtures/report.json" ]] || die "fixture report missing"
+
+RUNTIME_DIR="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/blockwatch-demo.XXXXXX")"
+# backup: the installed helper is preserved here until cleanup restores it.
+cp -p "$PLUGIN_DIR/bin/blockwatch" "$RUNTIME_DIR/helper.orig"
+
+FOCUS_BEFORE="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')"
+read -r CURSOR_X CURSOR_Y < <(hyprctl cursorpos | tr ',' ' ')
+
+restore() {
+  local status=$?
+  trap - EXIT INT TERM HUP
+  set +e
+  omarchy-shell io.github.ekollof.blockwatch closeAll >/dev/null 2>&1
+  rm -f /tmp/blockwatch-demo-served
+  if [[ -f "$RUNTIME_DIR/helper.orig" ]]; then
+    if cp -p "$RUNTIME_DIR/helper.orig" "$PLUGIN_DIR/bin/blockwatch" \
+       && chmod 0755 "$PLUGIN_DIR/bin/blockwatch"; then
+      rm -f "$PLUGIN_DIR/bin/demo-report.json"
+      omarchy-shell io.github.ekollof.blockwatch refresh >/dev/null 2>&1
+      RESTORE_OK=1
+    else
+      printf 'demo: RESTORE FAILED; helper backup kept at %s\n' \
+        "$RUNTIME_DIR/helper.orig" >&2
+    fi
+  fi
+  if [[ -n "$FOCUS_BEFORE" ]]; then
+    hyprctl dispatch "hl.dsp.focus({monitor=\"$FOCUS_BEFORE\"})" >/dev/null 2>&1
+  fi
+  hyprctl dispatch "hl.dsp.cursor.move({x=$CURSOR_X,y=$CURSOR_Y})" >/dev/null 2>&1
+  if [[ "$RESTORE_OK" == "1" && -n "$RUNTIME_DIR" ]]; then
+    rm -f "$RUNTIME_DIR/helper.orig"
+    rmdir "$RUNTIME_DIR" 2>/dev/null || true
+  elif [[ -n "$RUNTIME_DIR" ]]; then
+    printf 'demo: cleanup incomplete; recovery files kept at %s\n' "$RUNTIME_DIR" >&2
+  fi
+  if [[ "$RESTORE_OK" != "1" ]]; then
+    exit 1
+  fi
+  exit "$status"
+}
+trap restore EXIT INT TERM HUP
+
+install -m 0755 "$REPO_DIR/demo/fixtures/helper.py" "$PLUGIN_DIR/bin/blockwatch"
+install -m 0644 "$REPO_DIR/demo/fixtures/report.json" "$PLUGIN_DIR/bin/demo-report.json"
+rm -f "$MARKER"
+
+# Restart the shell so the demo helper is used by the service and the demo IPC
+# methods are registered. The real helper and user config are restored on exit.
+omarchy-restart-shell >/dev/null 2>&1
+for _ in $(seq 1 120); do
+  omarchy-shell -q shell ping >/dev/null 2>&1 && break
+  sleep 0.25
+done
+hyprctl dispatch "hl.dsp.focus({monitor=\"$SCREEN\"})" >/dev/null 2>&1
+
+for _ in $(seq 1 80); do
+  [[ -f "$MARKER" ]] && break
+  sleep 0.25
+done
+[[ -f "$MARKER" ]] || die "demo helper was not polled; fixture was not served"
+
+omarchy-shell io.github.ekollof.blockwatch openAll >/dev/null
+for _ in $(seq 1 80); do
+  if hyprctl layers -j | jq -e --arg s "$SCREEN" \
+      '.[$s].levels | to_entries | any(.value[]? | .namespace == "omarchy-keyboard-panel")' >/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+hyprctl layers -j | jq -e --arg s "$SCREEN" \
+  '.[$s].levels | to_entries | any(.value[]? | .namespace == "omarchy-keyboard-panel")' >/dev/null \
+  || die "panel did not open on $SCREEN"
+# The panel is up; let the poll that served the fixture settle so the meta line
+# reads "checked just now" rather than "checking…".
+sleep 0.8
+
+mkdir -p "$(dirname "$OUT")"
+if [[ -n "${DEMO_REGION:-}" ]]; then
+  grim -g "$DEMO_REGION" "$OUT"
+else
+  MON_X="$(hyprctl monitors -j | jq --arg s "$SCREEN" '.[] | select(.name == $s) | .x')"
+  MON_W="$(hyprctl monitors -j | jq --arg s "$SCREEN" '.[] | select(.name == $s) | .width')"
+  WIDGET_X="$(omarchy-shell shell debugBarGeometry | jq --argjson w "$MON_W" \
+    '[.[] | select(.id == "io.github.ekollof.blockwatch") | .x | select(. < $w)] | max')"
+  [[ "$WIDGET_X" != "null" ]] || die "Blockwatch bar widget not found on $SCREEN"
+  LEFT=$((MON_X + WIDGET_X + 13 - 210))
+  MAX_LEFT=$((MON_X + MON_W - 440))
+  (( LEFT > MAX_LEFT )) && LEFT=$MAX_LEFT
+  (( LEFT < MON_X )) && LEFT=$MON_X
+  grim -g "${LEFT},0 440x${HEIGHT}" "$OUT"
+fi
+
+printf 'demo: fixture demo/fixtures/report.json\n'
+printf 'demo: capture %s\n' "$OUT"
+printf 'demo: restore pending\n'
