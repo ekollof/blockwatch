@@ -13,10 +13,12 @@ is a secret: it reveals incoming payments to whoever holds it.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import stat
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -284,6 +286,43 @@ def _tighten(path, mode):
         pass
 
 
+@contextmanager
+def config_lock(path=None):
+    """Serialize config reads/edits against the poll's per-address checks.
+
+    The poll holds this lock while it reloads the config and performs one
+    address's network checks. A CLI add/update/remove therefore cannot report
+    success while an older poll snapshot is still about to contact the removed
+    watch. The lock file lives beside the config, is 0600, and is never a
+    symlink.
+    """
+    target = path or default_config_path()
+    directory = os.path.dirname(target) or "."
+    try:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        _tighten(directory, 0o700)
+        lock_path = target + ".lock"
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise BlockwatchError(f"cannot lock config: {error.strerror or error}") from None
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
 def load_config(path=None):
     path = path or default_config_path()
     if not os.path.exists(path):
@@ -365,16 +404,17 @@ def save_config(document, path=None):
 
 
 def add_address(raw, path=None):
-    document = load_config(path)
-    entry = normalize_entry(raw)
-    if any(item["id"] == entry["id"] for item in document["addresses"]):
-        raise BlockwatchError("that address is already watched")
-    if len(document["addresses"]) >= MAX_ADDRESSES:
-        raise BlockwatchError(f"at most {MAX_ADDRESSES} addresses can be watched")
-    document["addresses"].append(entry)
-    remember_server(document, entry)
-    save_config(document, path)
-    return entry
+    with config_lock(path):
+        document = load_config(path)
+        entry = normalize_entry(raw)
+        if any(item["id"] == entry["id"] for item in document["addresses"]):
+            raise BlockwatchError("that address is already watched")
+        if len(document["addresses"]) >= MAX_ADDRESSES:
+            raise BlockwatchError(f"at most {MAX_ADDRESSES} addresses can be watched")
+        document["addresses"].append(entry)
+        remember_server(document, entry)
+        save_config(document, path)
+        return entry
 
 
 def update_address(identifier, raw, path=None):
@@ -384,6 +424,12 @@ def update_address(identifier, raw, path=None):
     view key means "keep the stored one". If the address or chain changes the
     old key cannot be assumed to belong to the new target and is dropped.
     """
+    with config_lock(path):
+        return _update_address_unlocked(identifier, raw, path)
+
+
+def _update_address_unlocked(identifier, raw, path=None):
+    """Replace one watch. Caller holds config_lock."""
     document = load_config(path)
     needle = str(identifier or "").strip()
     index = None
@@ -445,6 +491,11 @@ def update_address(identifier, raw, path=None):
 
 
 def add_server(raw, path=None):
+    with config_lock(path):
+        return _add_server_unlocked(raw, path)
+
+
+def _add_server_unlocked(raw, path=None):
     document = load_config(path)
     server = normalize_server(raw)
     server["custom"] = True
@@ -460,6 +511,11 @@ def add_server(raw, path=None):
 
 
 def remove_server(identifier, path=None):
+    with config_lock(path):
+        return _remove_server_unlocked(identifier, path)
+
+
+def _remove_server_unlocked(identifier, path=None):
     document = load_config(path)
     needle = str(identifier or "").strip()
     if any(item["id"] == needle or item["endpoint"] == needle for item in BUILTIN_SERVERS):
@@ -479,6 +535,11 @@ def remove_server(identifier, path=None):
 
 
 def remove_address(identifier, path=None):
+    with config_lock(path):
+        return _remove_address_unlocked(identifier, path)
+
+
+def _remove_address_unlocked(identifier, path=None):
     document = load_config(path)
     needle = str(identifier or "").strip()
     if not needle:

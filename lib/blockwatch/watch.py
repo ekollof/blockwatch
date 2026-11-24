@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from .config import CHAINS, chain_list, load_config, server_list
+from .config import CHAINS, chain_list, config_lock, load_config, server_list
 from .providers import Activity, fetch
 from .state import (load_state, prune_state, remember_seen, save_state)
 from .util import BlockwatchError, format_units
@@ -207,8 +207,18 @@ def poll(config_path=None, state_path=None):
     all_events = []
     errors = []
     next_addresses = {}
+    live_config = config
     for entry in config["addresses"]:
-        result, state_entry, error = _poll_one(entry, state, checked_at)
+        with config_lock(config_path):
+            # Re-read under the lock: a CLI removal must not be followed by a
+            # request from this poll's older snapshot.
+            live_config = load_config(config_path)
+            live_entry = next(
+                (item for item in live_config["addresses"]
+                 if item["id"] == entry["id"]), None)
+            if live_entry is None:
+                continue
+            result, state_entry, error = _poll_one(live_entry, state, checked_at)
         results.append(result)
         if state_entry is not None:
             next_addresses[entry["id"]] = state_entry
@@ -233,7 +243,7 @@ def poll(config_path=None, state_path=None):
         "addresses": results,
         "events": all_events[:MAX_REPORT_EVENTS],
         "errors": errors,
-        "servers": server_list(config),
+        "servers": server_list(live_config),
     }
 
 

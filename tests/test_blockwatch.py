@@ -11,6 +11,8 @@ import os
 import stat
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -21,7 +23,7 @@ from blockwatch import http, providers, watch  # noqa: E402
 from blockwatch import cli  # noqa: E402
 from blockwatch.config import (add_address, add_server, load_config,  # noqa: E402
                                remove_address, remove_server, save_config,
-                               server_list, update_address)
+                               server_list, update_address, config_lock)
 from blockwatch.providers import Activity, Snapshot  # noqa: E402
 from blockwatch.state import load_state  # noqa: E402
 from blockwatch.util import (BlockwatchError, ValidationError, format_units,  # noqa: E402
@@ -426,6 +428,27 @@ class UpdateTests(TempFiles):
     def test_unknown_watch_is_refused(self):
         with self.assertRaises(BlockwatchError):
             update_address("btc:nope", {"label": "x"}, self.config)
+
+
+class ConfigLockTests(TempFiles):
+    def test_mutation_waits_for_the_config_lock(self):
+        add_address({"chain": "btc", "address": BTC_ADDRESS}, self.config)
+        cm = config_lock(self.config)
+        cm.__enter__()
+        done = []
+        thread = threading.Thread(target=lambda: (
+            add_address({"chain": "ltc", "address":
+                         "LdP8Qox1VAhCzLJNqrr74YovaWYyNBUWvL"}, self.config),
+            done.append(True),
+        ))
+        thread.start()
+        time.sleep(0.2)
+        self.assertTrue(thread.is_alive())
+        cm.__exit__(None, None, None)
+        thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(done, [True])
+        self.assertEqual(len(load_config(self.config)["addresses"]), 2)
 
 
 class CliCredentialTests(TempFiles):

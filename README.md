@@ -308,7 +308,8 @@ Widget settings live in the normal Omarchy entry (`omarchy bar set`):
 - Every request has a timeout and a response-size cap; every list and string
   is bounded before display or storage.
 - Stopping or editing a watch cancels any in-flight poll before the config
-  write, so a removed XMR watch is not contacted by the old poll snapshot.
+  write. CLI mutations use the same config lock as each address check, so a
+  CLI removal also cannot be followed by a request from an older poll.
 - Processes are started with argv arrays through omakit's `Run` block, never a
   shell string. QML displays provider and user text with
   `Text.PlainText`.
