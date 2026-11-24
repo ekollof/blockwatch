@@ -381,11 +381,7 @@ Item {
         root.pendingStatus = false
         var mutation = root.pendingMutation
         root.pendingMutation = null
-        if (mutation) {
-          Qt.callLater(function() {
-            root.executeMutation(mutation.kind, mutation.data)
-          })
-        }
+        if (mutation) root.executeMutation(mutation.kind, mutation.data)
         return
       }
       var document = null
