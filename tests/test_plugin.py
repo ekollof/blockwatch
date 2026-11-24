@@ -65,6 +65,13 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("notificationText", source)
         self.assertIn("replace(/[<>&]/g", source)
 
+    def test_config_mutations_cancel_an_in_flight_poll(self):
+        with open(os.path.join(ROOT, "service.qml"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("queueMutation", source)
+        self.assertIn("pollRun.cancel()", source)
+        self.assertIn("pendingMutation", source)
+
 
 class TranslationTests(unittest.TestCase):
     def test_every_used_key_exists(self):

@@ -4,6 +4,8 @@ Network access is never used here: provider parsers are tested with recorded
 shapes, and the poll tests replace `blockwatch.watch.fetch`.
 """
 
+import contextlib
+import io
 import json
 import os
 import stat
@@ -16,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 
 from blockwatch import http, providers, watch  # noqa: E402
+from blockwatch import cli  # noqa: E402
 from blockwatch.config import (add_address, add_server, load_config,  # noqa: E402
                                remove_address, remove_server, save_config,
                                server_list, update_address)
@@ -26,6 +29,7 @@ from blockwatch.util import (BlockwatchError, ValidationError, format_units,  # 
 
 
 BTC_ADDRESS = "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97"
+SOL_ADDRESS = "grsdZ8zj8RzuUiEeK2qKrTcd9CdJBxjVbxxAhHPzeFpY"
 # Shape-valid placeholders only: no real wallet keys belong in this repository.
 XMR_ADDRESS = "4" + "A" * 94
 XMR_VIEW_KEY = "ab" * 32
@@ -422,6 +426,43 @@ class UpdateTests(TempFiles):
     def test_unknown_watch_is_refused(self):
         with self.assertRaises(BlockwatchError):
             update_address("btc:nope", {"label": "x"}, self.config)
+
+
+class CliCredentialTests(TempFiles):
+    def test_update_does_not_reapply_env_api_key_to_a_new_endpoint(self):
+        add_address({
+            "chain": "sol",
+            "address": SOL_ADDRESS,
+            "apiKey": "old-provider-token",
+        }, self.config)
+        entry = load_config(self.config)["addresses"][0]
+        with mock.patch.dict(os.environ, {"BLOCKWATCH_API_KEY": "old-provider-token"}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main([
+                    "--config", self.config, "--state", self.state,
+                    "update", entry["id"], "--endpoint", "https://solana.example.org",
+                ])
+        self.assertEqual(code, 0)
+        updated = load_config(self.config)["addresses"][0]
+        self.assertEqual(updated["endpoint"], "https://solana.example.org")
+        self.assertNotIn("apiKey", updated)
+
+    def test_update_still_accepts_an_explicit_new_api_key(self):
+        add_address({
+            "chain": "sol",
+            "address": SOL_ADDRESS,
+            "apiKey": "old-provider-token",
+        }, self.config)
+        entry = load_config(self.config)["addresses"][0]
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = cli.main([
+                "--config", self.config, "--state", self.state,
+                "update", entry["id"], "--endpoint", "https://solana.example.org",
+                "--api-key", "new-provider-token",
+            ])
+        self.assertEqual(code, 0)
+        updated = load_config(self.config)["addresses"][0]
+        self.assertEqual(updated["apiKey"], "new-provider-token")
 
 
 class ServerStatusTests(TempFiles):

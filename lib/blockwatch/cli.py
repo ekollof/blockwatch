@@ -143,9 +143,12 @@ def _run(args):
         return {"ok": True, "entry": _public_entry(entry)}
     if args.command == "update":
         view_key = args.view_key or os.environ.get("BLOCKWATCH_VIEW_KEY") or None
-        api_key = args.api_key or os.environ.get("BLOCKWATCH_API_KEY") or None
-        rpc_user = args.rpc_user or os.environ.get("BLOCKWATCH_RPC_USER") or None
-        rpc_pass = args.rpc_password or os.environ.get("BLOCKWATCH_RPC_PASSWORD") or None
+        # Provider credentials are endpoint-bound. Do not reapply a global
+        # environment token to a different endpoint on an update; require an
+        # explicit --api-key/--rpc-* choice for the new provider.
+        api_key = args.api_key
+        rpc_user = args.rpc_user
+        rpc_pass = args.rpc_password
         raw = {
             "chain": args.chain,
             "address": args.address,

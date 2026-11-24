@@ -35,6 +35,8 @@ Item {
   property bool pendingStatus: false
   property bool started: false
   property int widgetCount: 0
+  property var pendingMutation: null
+  property bool cancellingPoll: false
 
   signal actionFinished(bool ok, string message)
 
@@ -86,6 +88,10 @@ Item {
   }
 
   function poll() {
+    if (root.cancellingPoll || root.pendingMutation) {
+      pendingPoll = true
+      return
+    }
     if (pollRun.running || statusRun.running || actionRun.running) {
       pendingPoll = true
       return
@@ -115,47 +121,86 @@ Item {
   }
 
   function addAddress(chain, address, label, viewKey, mode, endpoint) {
-    if (actionRun.running || actionBusy) return
-    var args = baseCommand.concat(["add", "--chain", String(chain), "--address", String(address)])
-    if (String(label || "").trim() !== "") args = args.concat(["--label", String(label).trim()])
-    if (String(mode || "") !== "") args = args.concat(["--mode", String(mode)])
-    if (String(endpoint || "").trim() !== "") args = args.concat(["--endpoint", String(endpoint).trim()])
-    actionKind = "add"
-    actionTarget = String(label || address)
-    actionError = ""
-    actionBusy = true
-    actionRun.environment = { "BLOCKWATCH_VIEW_KEY": String(viewKey || "").trim() }
-    actionRun.command = args
-    actionRun.start()
+    queueMutation("add", {
+      chain: chain,
+      address: address,
+      label: label,
+      viewKey: viewKey,
+      mode: mode,
+      endpoint: endpoint,
+    })
   }
 
   function updateAddress(id, chain, address, label, viewKey, mode, endpoint) {
+    queueMutation("update", {
+      id: id,
+      chain: chain,
+      address: address,
+      label: label,
+      viewKey: viewKey,
+      mode: mode,
+      endpoint: endpoint,
+    })
+  }
+
+  function removeAddress(id) {
+    queueMutation("remove", { id: id })
+  }
+
+  // A config mutation must not race a poll that already holds the old watch
+  // list: that poll could still be about to contact an address the user just
+  // stopped, including its light-wallet server. Cancel it, wait for the
+  // process group to be gone, then apply the edit.
+  function queueMutation(kind, data) {
     if (actionRun.running || actionBusy) return
-    var args = baseCommand.concat([
-      "update", String(id),
-      "--chain", String(chain),
-      "--address", String(address),
-      "--label", String(label || "")
-    ])
-    if (String(mode || "") !== "") args = args.concat(["--mode", String(mode)])
-    if (String(endpoint || "").trim() !== "") args = args.concat(["--endpoint", String(endpoint).trim()])
-    actionKind = "update"
-    actionTarget = String(label || address)
+    if (pollRun.running) {
+      pendingMutation = { kind: kind, data: data }
+      cancellingPoll = true
+      actionBusy = true
+      pendingPoll = false
+      pollRun.cancel()
+      return
+    }
+    executeMutation(kind, data)
+  }
+
+  function executeMutation(kind, data) {
+    if (actionRun.running || actionBusy) return
+    var args = []
+    var viewKey = ""
+    if (kind === "add") {
+      args = baseCommand.concat(["add", "--chain", String(data.chain),
+                                 "--address", String(data.address)])
+      if (String(data.label || "").trim() !== "")
+        args = args.concat(["--label", String(data.label).trim()])
+      if (String(data.mode || "") !== "")
+        args = args.concat(["--mode", String(data.mode)])
+      if (String(data.endpoint || "").trim() !== "")
+        args = args.concat(["--endpoint", String(data.endpoint).trim()])
+      viewKey = data.viewKey
+    } else if (kind === "update") {
+      args = baseCommand.concat([
+        "update", String(data.id),
+        "--chain", String(data.chain),
+        "--address", String(data.address),
+        "--label", String(data.label || "")
+      ])
+      if (String(data.mode || "") !== "")
+        args = args.concat(["--mode", String(data.mode)])
+      if (String(data.endpoint || "").trim() !== "")
+        args = args.concat(["--endpoint", String(data.endpoint).trim()])
+      viewKey = data.viewKey
+    } else if (kind === "remove") {
+      args = baseCommand.concat(["remove", String(data.id)])
+    } else {
+      return
+    }
+    actionKind = kind
+    actionTarget = String(data.label || data.address || data.id || "")
     actionError = ""
     actionBusy = true
     actionRun.environment = { "BLOCKWATCH_VIEW_KEY": String(viewKey || "").trim() }
     actionRun.command = args
-    actionRun.start()
-  }
-
-  function removeAddress(id) {
-    if (actionRun.running || actionBusy) return
-    actionKind = "remove"
-    actionTarget = String(id)
-    actionError = ""
-    actionBusy = true
-    actionRun.environment = ({})
-    actionRun.command = baseCommand.concat(["remove", String(id)])
     actionRun.start()
   }
 
@@ -329,6 +374,20 @@ Item {
     keepBytes: 1048576
     onFinished: function(result) {
       root.busy = false
+      if (root.cancellingPoll) {
+        root.cancellingPoll = false
+        root.actionBusy = false
+        root.pendingPoll = false
+        root.pendingStatus = false
+        var mutation = root.pendingMutation
+        root.pendingMutation = null
+        if (mutation) {
+          Qt.callLater(function() {
+            root.executeMutation(mutation.kind, mutation.data)
+          })
+        }
+        return
+      }
       var document = null
       if (result.state !== "ok") {
         var failure = root.helperError(result)

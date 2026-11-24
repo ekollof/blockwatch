@@ -99,6 +99,12 @@ manager's `lookup` command is another good source. The `--view-key`,
 commands, but they are visible in `ps` and shell history. The panel passes the
 view key to its helper through `BLOCKWATCH_VIEW_KEY`, never as an argument.
 
+Environment API/RPC credentials apply when **adding** a watch. An `update` does
+not reapply a global `BLOCKWATCH_API_KEY`/`BLOCKWATCH_RPC_*` to a changed
+endpoint: pass the new provider's credential explicitly with `--api-key` /
+`--rpc-user` / `--rpc-password` (or edit the `0600` config), so a token chosen
+for one provider cannot follow an endpoint change to another.
+
 Custom XMR servers are remembered automatically when a watch using one is
 saved. They can also be managed directly:
 
@@ -301,6 +307,8 @@ Widget settings live in the normal Omarchy entry (`omarchy bar set`):
   cannot change host or scheme.
 - Every request has a timeout and a response-size cap; every list and string
   is bounded before display or storage.
+- Stopping or editing a watch cancels any in-flight poll before the config
+  write, so a removed XMR watch is not contacted by the old poll snapshot.
 - Processes are started with argv arrays through omakit's `Run` block, never a
   shell string. QML displays provider and user text with
   `Text.PlainText`.
