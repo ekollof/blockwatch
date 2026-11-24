@@ -15,6 +15,7 @@ import time
 
 from . import __version__
 from .config import default_state_path
+from .rates import clean_cache
 from .util import BlockwatchError, digit_string, iso_from_string, text
 
 STATE_VERSION = 1
@@ -22,7 +23,8 @@ MAX_SEEN = 200
 
 
 def empty_state():
-    return {"version": STATE_VERSION, "checkedAt": None, "addresses": {}, "lastResults": {}}
+    return {"version": STATE_VERSION, "checkedAt": None, "addresses": {},
+            "lastResults": {}, "rates": None}
 
 
 def _tighten(path, mode):
@@ -150,6 +152,7 @@ def load_state(path=None):
     state["checkedAt"] = iso_from_string(document.get("checkedAt"))
     state["addresses"] = _clean_addresses(document.get("addresses"))
     state["lastResults"] = _clean_results(document.get("lastResults"))
+    state["rates"] = clean_cache(document.get("rates"))
     return state, None
 
 
@@ -163,6 +166,7 @@ def save_state(state, path=None):
         "checkedAt": state.get("checkedAt"),
         "addresses": state.get("addresses", {}),
         "lastResults": state.get("lastResults", {}),
+        "rates": state.get("rates"),
         "writer": f"blockwatch/{__version__}",
     }
     payload = json.dumps(document, ensure_ascii=False, separators=(",", ":")) + "\n"

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from .config import CHAINS, chain_list, config_lock, load_config, server_list
 from .providers import Activity, fetch
+from .rates import fiat_fields, fiat_list, rates_for
 from .state import (load_state, prune_state, remember_seen, save_state)
 from .util import BlockwatchError, format_units
 
@@ -70,7 +71,7 @@ def _event_dict(activity, entry, chain, checked_at):
 
 
 def _result(entry, chain, snapshot=None, error=None, initialized=False,
-            events=None, truncated=0, previous=None):
+            events=None, truncated=0, previous=None, rates=None):
     balance_raw = snapshot.balance_raw if snapshot else (previous or {}).get("balanceRaw")
     balance = None
     if balance_raw is not None:
@@ -78,6 +79,7 @@ def _result(entry, chain, snapshot=None, error=None, initialized=False,
             balance = format_units(balance_raw, chain.decimals)
         except BlockwatchError:
             balance = None
+    fiat = fiat_fields(balance_raw, chain.decimals, chain.symbol, rates)
     result = {
         "id": entry["id"],
         "chain": chain.id,
@@ -91,6 +93,10 @@ def _result(entry, chain, snapshot=None, error=None, initialized=False,
         "balance": balance,
         "balanceRaw": balance_raw,
         "balanceLabel": snapshot.balance_label if snapshot else "balance",
+        "fiatValue": fiat["fiatValue"],
+        "fiatCurrency": fiat["fiatCurrency"],
+        "fiatSymbol": fiat["fiatSymbol"],
+        "fiatDecimals": fiat["fiatDecimals"],
         "status": "error" if error else ("pending" if snapshot and snapshot.registered is False else "ok"),
         "error": error,
         "note": snapshot.note if snapshot else "",
@@ -134,22 +140,24 @@ def _fresh_activities(snapshot, previous, activities):
     return _with_balance_direction(fresh, previous.get("balanceRaw"), snapshot.balance_raw), truncated
 
 
-def _check(entry, previous, checked_at):
+def _check(entry, previous, checked_at, rates):
     chain = CHAINS[entry["chain"]]
     try:
         snapshot = fetch(entry)
     except BlockwatchError as error:
-        return _result(entry, chain, error=str(error), previous=previous), previous
+        return _result(entry, chain, error=str(error), previous=previous,
+                       rates=rates), previous
     except Exception:  # noqa: BLE001 - provider JSON is untrusted
         return _result(entry, chain, error="provider returned unusable data",
-                       previous=previous), previous
+                       previous=previous, rates=rates), previous
 
     activities = list(snapshot.activities)[:MAX_EVENTS_PER_ADDRESS]
     initialized = previous is None
     fresh, truncated = _fresh_activities(snapshot, previous, activities)
     events = [_event_dict(activity, entry, chain, checked_at) for activity in fresh]
     result = _result(entry, chain, snapshot=snapshot, initialized=initialized,
-                     events=events, truncated=truncated, previous=previous)
+                     events=events, truncated=truncated, previous=previous,
+                     rates=rates)
 
     last_event_at = checked_at if events else (previous or {}).get("lastEventAt")
     state_entry = {
@@ -179,9 +187,9 @@ def _summary(result, checked_at):
     }
 
 
-def _poll_one(entry, state, checked_at):
+def _poll_one(entry, state, checked_at, rates):
     previous = state["addresses"].get(entry["id"])
-    result, state_entry = _check(entry, previous, checked_at)
+    result, state_entry = _check(entry, previous, checked_at, rates)
     summary = _summary(result, checked_at)
     summary["lastEventAt"] = (state_entry or {}).get("lastEventAt") or (
         previous or {}).get("lastEventAt")
@@ -196,12 +204,13 @@ def _poll_one(entry, state, checked_at):
     return result, state_entry, error
 
 
-def poll(config_path=None, state_path=None):
+def poll(config_path=None, state_path=None, fiat="USD"):
     started = time.monotonic()
     config = load_config(config_path)
     state, warning = load_state(state_path)
     prune_state(state, config["addresses"])
     checked_at = _now()
+    rates = rates_for(state, fiat, fetch=True)
 
     results = []
     all_events = []
@@ -218,7 +227,7 @@ def poll(config_path=None, state_path=None):
                  if item["id"] == entry["id"]), None)
             if live_entry is None:
                 continue
-            result, state_entry, error = _poll_one(live_entry, state, checked_at)
+            result, state_entry, error = _poll_one(live_entry, state, checked_at, rates)
         results.append(result)
         if state_entry is not None:
             next_addresses[entry["id"]] = state_entry
@@ -244,11 +253,14 @@ def poll(config_path=None, state_path=None):
         "events": all_events[:MAX_REPORT_EVENTS],
         "errors": errors,
         "servers": server_list(live_config),
+        "rates": rates,
+        "fiatCurrencies": fiat_list(),
     }
 
 
-def _stored_address(entry, last, stored):
+def _stored_address(entry, last, stored, rates):
     chain = CHAINS[entry["chain"]]
+    fiat = fiat_fields(last.get("balanceRaw"), chain.decimals, chain.symbol, rates)
     return {
         "id": entry["id"],
         "chain": chain.id,
@@ -262,6 +274,10 @@ def _stored_address(entry, last, stored):
         "balance": last.get("balance"),
         "balanceRaw": last.get("balanceRaw"),
         "balanceLabel": last.get("balanceLabel", "balance"),
+        "fiatValue": fiat["fiatValue"],
+        "fiatCurrency": fiat["fiatCurrency"],
+        "fiatSymbol": fiat["fiatSymbol"],
+        "fiatDecimals": fiat["fiatDecimals"],
         "status": last.get("status", "unknown"),
         "error": last.get("error"),
         "note": last.get("note", ""),
@@ -273,7 +289,7 @@ def _stored_address(entry, last, stored):
     }
 
 
-def status(config_path=None, state_path=None):
+def status(config_path=None, state_path=None, fiat="USD"):
     config = load_config(config_path)
     state, warning = load_state(state_path)
     removed = prune_state(state, config["addresses"])
@@ -282,11 +298,13 @@ def status(config_path=None, state_path=None):
             save_state(state, state_path)
         except BlockwatchError:
             pass
+    rates = rates_for(state, fiat, fetch=False)
     addresses = [
         _stored_address(
             entry,
             state["lastResults"].get(entry["id"]) or {},
             state["addresses"].get(entry["id"]) or {},
+            rates,
         )
         for entry in config["addresses"]
     ]
@@ -300,4 +318,6 @@ def status(config_path=None, state_path=None):
         "errors": [],
         "chains": chain_list(),
         "servers": server_list(config),
+        "rates": rates,
+        "fiatCurrencies": fiat_list(),
     }

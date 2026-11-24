@@ -55,6 +55,7 @@
   "popup.addressMissing": "Enter an address to watch.",
   "popup.viewKeyMissing": "Monero needs the private view key, or choose monero-wallet-rpc.",
   "popup.footer": "Read-only: no spend key, no signing, no transactions sent.",
+  "popup.ratesUnavailable": "Fiat rates are stale or unavailable; native balances still update.",
   "notification.title": "Blockwatch · %1",
   "notification.received": "%1 received %2 %3",
   "notification.sent": "%1 sent %2 %3",

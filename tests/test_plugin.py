@@ -34,13 +34,16 @@ class ManifestTests(unittest.TestCase):
         self.assertFalse(widget["allowMultiple"])
         self.assertEqual(widget["defaultSection"], "right")
         keys = {item["key"] for item in widget["schema"]}
-        self.assertEqual(keys, {"refreshIntervalSec", "notify"})
+        self.assertEqual(keys, {"refreshIntervalSec", "notify", "fiatCurrency"})
         for item in widget["schema"]:
             if item["type"] == "integer":
                 self.assertLessEqual(item["min"], item["defaultValue"])
                 self.assertGreaterEqual(item["max"], item["defaultValue"])
+            elif item["type"] == "boolean":
+                self.assertTrue(item["defaultValue"] in (True, False))
             else:
-                self.assertEqual(item["type"], "boolean")
+                self.assertEqual(item["type"], "string")
+                self.assertTrue(item["defaultValue"])
 
     def test_omakit_run_block_is_vendored(self):
         for relative in ("omakit/Run.qml", "omakit/run-supervisor.py", "omakit/NOTICE"):
@@ -71,6 +74,12 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("queueMutation", source)
         self.assertIn("pollRun.cancel()", source)
         self.assertIn("pendingMutation", source)
+
+    def test_service_passes_the_fiat_currency(self):
+        with open(os.path.join(ROOT, "service.qml"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn('"--fiat"', source)
+        self.assertIn("fiatCurrency", source)
 
 
 class TranslationTests(unittest.TestCase):

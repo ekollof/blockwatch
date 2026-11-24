@@ -17,6 +17,7 @@ from .config import (CHAINS, add_address, add_server, chain_list,
                      default_config_path, default_state_path, load_config,
                      remove_address, remove_server, server_list,
                      update_address)
+from .rates import FIATS
 from .util import BlockwatchError
 from .watch import poll, status
 
@@ -27,6 +28,8 @@ def _parser():
         description="Read-only crypto address watcher for the Omarchy bar.")
     parser.add_argument("--config", default=None, help="config file path")
     parser.add_argument("--state", default=None, help="state file path")
+    parser.add_argument("--fiat", default="USD", choices=sorted(FIATS),
+                        help="fiat currency for balance estimates (default USD)")
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("poll", help="check every watched address and report events")
@@ -97,9 +100,9 @@ def _run(args):
     state_path = args.state or default_state_path()
 
     if args.command == "poll":
-        return poll(config_path, state_path)
+        return poll(config_path, state_path, args.fiat)
     if args.command == "status":
-        return status(config_path, state_path)
+        return status(config_path, state_path, args.fiat)
     if args.command == "list":
         document = load_config(config_path)
         return {"ok": True, "addresses": [_public_entry(item) for item in document["addresses"]]}

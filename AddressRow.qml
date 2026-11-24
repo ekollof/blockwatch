@@ -27,6 +27,28 @@ Item {
   readonly property bool isPending: !!entry && entry.status === "pending"
   readonly property string labelText: entry ? Model.displayLabel(entry) : ""
   readonly property string chainGlyph: entry ? Model.chainGlyph(entry.chain) : ""
+  readonly property string fiatText: {
+    if (!entry || entry.fiatValue === null || entry.fiatValue === undefined
+        || String(entry.fiatValue) === "") return ""
+    var symbol = String(entry.fiatSymbol || entry.fiatCurrency || "")
+    if (symbol === "") return ""
+    var decimals = entry.fiatDecimals === undefined || entry.fiatDecimals === null
+      ? 2 : Number(entry.fiatDecimals)
+    var numeric = Number(entry.fiatValue)
+    var shown = isFinite(numeric)
+      ? row.groupedNumber(numeric, decimals) : String(entry.fiatValue)
+    var gap = /[A-Za-z]/.test(symbol) ? " " : ""
+    return "≈ " + symbol + gap + shown
+  }
+
+  function groupedNumber(value, decimals) {
+    var text = Commons.I18n.formatNumber(value, decimals)
+    var decimal = Commons.I18n.decimal || "."
+    var group = decimal === "." ? "," : "."
+    var parts = text.split(decimal)
+    parts[0] = parts[0].replace(/\B(?=([0-9]{3})+(?![0-9]))/g, group)
+    return parts.join(decimal)
+  }
 
   implicitWidth: parent ? parent.width : Style.space(320)
   implicitHeight: content.implicitHeight + Style.space(16)
@@ -136,6 +158,17 @@ Item {
         text: row.balanceText()
         visible: text !== ""
         color: row.dim
+        font.family: row.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+        width: parent.width
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        text: row.fiatText
+        visible: text !== ""
+        color: row.faint
         font.family: row.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight

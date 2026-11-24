@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.blockwatch",
   "name": "Blockwatch",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Emiel Kollof <emiel@kollof.nl>",
   "license": "MIT",
   "description": "Read-only watch of crypto addresses for new incoming and outgoing transactions, with desktop notifications.",
@@ -23,7 +23,8 @@
     "defaultSection": "right",
     "defaults": {
       "refreshIntervalSec": 120,
-      "notify": true
+      "notify": true,
+      "fiatCurrency": "USD"
     },
     "schema": [
       {
@@ -40,6 +41,12 @@
         "type": "boolean",
         "label": "Notify on new transactions",
         "defaultValue": true
+      },
+      {
+        "key": "fiatCurrency",
+        "type": "string",
+        "label": "Fiat currency for balance estimates",
+        "defaultValue": "USD"
       }
     ]
   }

@@ -17,6 +17,8 @@ Item {
   property var settings: null
   property var chains: []
   property var servers: []
+  property var fiatCurrencies: []
+  property var rates: ({})
   property var addresses: []
   property var events: []
   property var errors: []
@@ -70,6 +72,14 @@ Item {
   }
   readonly property bool notifyEnabled: root.settings !== null
     && setting("notify", true) === true
+  readonly property string fiatCurrency: {
+    var value = String(setting("fiatCurrency", "USD")).toUpperCase()
+    var list = root.fiatCurrencies || []
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && String(list[i].code) === value) return value
+    }
+    return "USD"
+  }
   readonly property int addressCount: addresses.length
   readonly property bool hasAddresses: addresses.length > 0
   readonly property bool online: Networking.connectivity === NetworkConnectivity.Full
@@ -238,6 +248,10 @@ Item {
       root.chains = document.chains
     if (Array.isArray(document.servers))
       root.servers = document.servers
+    if (Array.isArray(document.fiatCurrencies))
+      root.fiatCurrencies = document.fiatCurrencies
+    if (document.rates && typeof document.rates === "object")
+      root.rates = document.rates
     root.addresses = document.addresses
     root.checkedAt = typeof document.checkedAt === "string" ? document.checkedAt : ""
     root.warning = typeof document.warning === "string" ? document.warning : ""
@@ -335,7 +349,7 @@ Item {
 
   Run {
     id: statusRun
-    command: root.baseCommand.concat(["status"])
+    command: root.baseCommand.concat(["--fiat", root.fiatCurrency, "status"])
     deadlineMs: 15000
     maxBytes: 1048576
     keepBytes: 1048576
@@ -368,7 +382,7 @@ Item {
 
   Run {
     id: pollRun
-    command: root.baseCommand.concat(["poll"])
+    command: root.baseCommand.concat(["--fiat", root.fiatCurrency, "poll"])
     deadlineMs: 90000
     maxBytes: 2097152
     keepBytes: 1048576

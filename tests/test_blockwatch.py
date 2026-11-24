@@ -19,7 +19,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lib"))
 
-from blockwatch import http, providers, watch  # noqa: E402
+from blockwatch import http, providers, rates, watch  # noqa: E402
 from blockwatch import cli  # noqa: E402
 from blockwatch.config import (add_address, add_server, load_config,  # noqa: E402
                                remove_address, remove_server, save_config,
@@ -35,6 +35,8 @@ SOL_ADDRESS = "grsdZ8zj8RzuUiEeK2qKrTcd9CdJBxjVbxxAhHPzeFpY"
 # Shape-valid placeholders only: no real wallet keys belong in this repository.
 XMR_ADDRESS = "4" + "A" * 94
 XMR_VIEW_KEY = "ab" * 32
+FAKE_RATES = {"BTC": "100000", "LTC": "120", "DOGE": "0.4",
+              "ETH": "4000", "SOL": "200", "XMR": "300"}
 
 
 class TempFiles(unittest.TestCase):
@@ -231,6 +233,12 @@ class UrlTests(unittest.TestCase):
 
 
 class PollTests(TempFiles):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch("blockwatch.rates.fetch_rates", return_value=FAKE_RATES)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def add_btc(self):
         add_address({"chain": "btc", "address": BTC_ADDRESS, "label": "Cold"},
                     self.config)
@@ -244,6 +252,10 @@ class PollTests(TempFiles):
         self.assertEqual(report["events"], [])
         self.assertTrue(report["addresses"][0]["initialized"])
         self.assertEqual(report["addresses"][0]["balance"], "0.00001")
+        self.assertEqual(report["addresses"][0]["fiatValue"], "1.00")
+        self.assertEqual(report["rates"]["currency"], "USD")
+        status = watch.status(self.config, self.state, "USD")
+        self.assertEqual(status["addresses"][0]["fiatValue"], "1.00")
 
     def test_new_transaction_notifies_once(self):
         self.add_btc()
@@ -451,6 +463,62 @@ class ConfigLockTests(TempFiles):
         self.assertEqual(len(load_config(self.config)["addresses"]), 2)
 
 
+class RatesTests(unittest.TestCase):
+    def test_fiat_formatting(self):
+        report = {
+            "currency": "USD", "symbol": "$", "decimals": 2,
+            "values": {"BTC": "100000"},
+        }
+        fields = rates.fiat_fields("50000000", 8, "BTC", report)
+        self.assertEqual(fields["fiatValue"], "50000.00")
+        self.assertEqual(fields["fiatSymbol"], "$")
+        self.assertEqual(fields["fiatDecimals"], 2)
+
+    def test_missing_rate_leaves_value_empty(self):
+        fields = rates.fiat_fields("100", 8, "BTC", {"currency": "USD",
+                                                     "symbol": "$", "values": {}})
+        self.assertIsNone(fields["fiatValue"])
+
+    def test_fetch_rates_parses_one_document(self):
+        document = {
+            "bitcoin": {"usd": 95000.5},
+            "monero": {"usd": 320.25},
+        }
+        with mock.patch("blockwatch.rates.http.request_json", return_value=document):
+            values = rates.fetch_rates("usd")
+        self.assertEqual(values["BTC"], "95000.5")
+        self.assertEqual(values["XMR"], "320.25")
+        self.assertNotIn("ETH", values)
+
+    def test_fresh_cache_is_used_without_fetch(self):
+        state = {"rates": {"currency": "USD", "fetchedAt": rates._now(),
+                           "values": {"BTC": "100000"}}}
+        with mock.patch("blockwatch.rates.fetch_rates") as fetch:
+            report = rates.rates_for(state, "USD", fetch=True)
+        fetch.assert_not_called()
+        self.assertEqual(report["values"]["BTC"], "100000")
+        self.assertFalse(report["stale"])
+
+    def test_failed_fetch_falls_back_to_stale_cache(self):
+        state = {"rates": {"currency": "USD", "fetchedAt": "2020-01-01T00:00:00Z",
+                           "values": {"BTC": "100000"}}}
+        with mock.patch("blockwatch.rates.fetch_rates",
+                        side_effect=BlockwatchError("rate provider down")):
+            report = rates.rates_for(state, "USD", fetch=True)
+        self.assertTrue(report["stale"])
+        self.assertEqual(report["values"]["BTC"], "100000")
+        self.assertIn("rate provider down", report["error"])
+
+    def test_cache_for_another_currency_is_not_reused(self):
+        state = {"rates": {"currency": "USD", "fetchedAt": rates._now(),
+                           "values": {"BTC": "100000"}}}
+        with mock.patch("blockwatch.rates.fetch_rates",
+                        side_effect=BlockwatchError("down")):
+            report = rates.rates_for(state, "EUR", fetch=True)
+        self.assertEqual(report["values"], {})
+        self.assertEqual(report["currency"], "EUR")
+
+
 class CliCredentialTests(TempFiles):
     def test_update_does_not_reapply_env_api_key_to_a_new_endpoint(self):
         add_address({
@@ -502,6 +570,12 @@ class ServerStatusTests(TempFiles):
 
 
 class StatePruneTests(TempFiles):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch("blockwatch.rates.fetch_rates", return_value=FAKE_RATES)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_removed_address_state_is_pruned(self):
         add_address({"chain": "btc", "address": BTC_ADDRESS}, self.config)
         with mock.patch("blockwatch.watch.fetch",

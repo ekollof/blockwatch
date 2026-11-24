@@ -37,6 +37,8 @@ BarWidget {
     id: emptyBackend
     property var chains: []
     property var servers: []
+    property var fiatCurrencies: []
+    property var rates: ({})
     property var addresses: []
     property var errors: []
     property var events: []
@@ -236,6 +238,51 @@ BarWidget {
     return out
   }
   readonly property var selectedServer: root.findServer(root.addServerId)
+  readonly property var fiatOptions: {
+    var out = []
+    var list = backend.fiatCurrencies || []
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i]
+      if (!item || typeof item.code !== "string") continue
+      out.push({ value: item.code, label: item.code })
+    }
+    if (out.length === 0) out.push({ value: "USD", label: "USD" })
+    return out
+  }
+  readonly property string fiatCurrency: {
+    var value = String(root.setting("fiatCurrency", "USD")).toUpperCase()
+    var list = backend.fiatCurrencies || []
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && String(list[i].code) === value) return value
+    }
+    return "USD"
+  }
+
+  onFiatCurrencyChanged: {
+    if (fiatPicker.value !== root.fiatCurrency) fiatPicker.value = root.fiatCurrency
+  }
+
+  function setFiat(value) {
+    var code = String(value || "").toUpperCase()
+    if (code === "") return
+    var entry = { id: moduleName }
+    var current = root.settings || {}
+    for (var name in current) {
+      if (name !== "id") entry[name] = current[name]
+    }
+    entry.fiatCurrency = code
+    var api = bar ? bar.shell : null
+    if (api && api.updateEntryInline) {
+      if (!api.updateEntryInline(moduleName, entry)) {
+        fiatPicker.value = root.fiatCurrency
+        return
+      }
+      root.settings = entry
+      Qt.callLater(backend.poll)
+    } else {
+      fiatPicker.value = root.fiatCurrency
+    }
+  }
 
   function syncServerSelection() {
     if (root.addChain !== "xmr") {
@@ -475,7 +522,7 @@ BarWidget {
         spacing: Style.space(8)
 
         Column {
-          width: Math.max(0, parent.width - refreshButton.width - Style.space(8))
+          width: Math.max(0, parent.width - fiatPicker.width - refreshButton.width - Style.space(16))
           spacing: Style.space(2)
 
           Text {
@@ -495,6 +542,21 @@ BarWidget {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
+          }
+        }
+
+        Dropdown {
+          id: fiatPicker
+          width: Style.space(76)
+          value: root.fiatCurrency
+          options: root.fiatOptions
+          showLabel: false
+          rowHeight: Style.space(26)
+          popupRowHeight: Style.space(24)
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onChanged: function(value) {
+            root.setFiat(value)
           }
         }
 
@@ -829,6 +891,17 @@ BarWidget {
         width: parent.width
         text: strings.t("popup.footer")
         color: root.faint
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        visible: !!(backend.rates && backend.rates.error)
+        text: strings.t("popup.ratesUnavailable")
+        color: Commons.Color.urgent
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap

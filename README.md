@@ -10,9 +10,9 @@ debited. It is not a wallet: it holds no spend key, cannot sign, and never
 sends a transaction.
 
 <p align="center">
-  <img src="preview.png" width="420" alt="Blockwatch panel with four fictional watches">
+  <img src="preview.png" width="420" alt="Blockwatch panel with four fictional watches and USD estimates">
 </p>
-<p align="center"><sub>Fictional demo data, captured with <code>demo/run</code>.</sub></p>
+<p align="center"><sub>Fictional demo data, captured with <code>demo/run</code>; fiat estimates use a fixed fixture rate.</sub></p>
 
 ## What it does
 
@@ -21,7 +21,10 @@ sends a transaction.
   reconnect.
 - Sends a desktop notification for new credit or debit activity.
 - Shows each watched address, its native balance (or, for Monero, the amount
-  received), the last event and any provider error in a panel.
+  received), a selectable fiat estimate, the last event and any provider error
+  in a panel.
+- Converts balances to USD, EUR, GBP, JPY, CAD, AUD, CHF, CNY or INR with
+  cached CoinGecko rates; a rate outage never stops address monitoring.
 - Edits a live watch in place: click its row to change the label, address,
   Monero server or view key without deleting and re-adding it.
 - Remembers custom XMR light-wallet servers in a dropdown beside the built-in
@@ -41,6 +44,7 @@ sends a transaction.
 | ETH | [Blockscout](https://eth.blockscout.com) | Native ETH transfers only; tokens are not followed. |
 | SOL | Solana JSON-RPC | Public signatures and balance; no key needed. |
 | XMR | [monero-lws](https://github.com/vtnerd/monero-lws) or `monero-wallet-rpc` | Needs the private **view** key. See below. |
+| Fiat rates | [CoinGecko](https://www.coingecko.com/en/api) | One cached request per five minutes; sends coin symbols and the selected currency, never addresses. |
 
 The endpoint for one address can be overridden in the config file, so a
 different Blockscout instance (Base, Optimism, Gnosis, …), a private Solana
@@ -271,6 +275,12 @@ Widget settings live in the normal Omarchy entry (`omarchy bar set`):
 | --- | --- | --- |
 | `refreshIntervalSec` | 120 | 30–3600 |
 | `notify` | `true` | boolean |
+| `fiatCurrency` | `USD` | USD, EUR, GBP, JPY, CAD, AUD, CHF, CNY, INR |
+
+The panel’s currency dropdown changes `fiatCurrency` and refreshes immediately.
+`blockwatch --fiat EUR poll` and `--fiat EUR status` do the same from a script.
+Rates are cached for five minutes; stale rates are shown with a small warning,
+and native balances continue to update if CoinGecko is unavailable.
 
 ## Notifications and state
 
@@ -294,6 +304,8 @@ Widget settings live in the normal Omarchy entry (`omarchy bar set`):
   can only reveal incoming payments.
 - No telemetry, analytics or crash reporting. Outbound requests go only to the
   provider or server shown for each watched address.
+- The fiat-rate request goes to CoinGecko and contains only the fixed coin
+  symbols and the selected currency code; no addresses, labels or keys.
 - Transparent chains are queried by address at the provider listed above.
   That reveals which addresses you care about to that provider. Use your own
   endpoint if that matters to you.
@@ -351,6 +363,8 @@ real helper/config on exit.
   case and unknown for bursts.
 - The BlockCypher free tier is rate limited; a token is recommended for more
   than a couple of Dogecoin addresses.
+- Fiat values are estimates from a cached CoinGecko spot rate, not accounting
+  or tax figures; the native balance is authoritative.
 - An LWS that has no history for a wallet begins where the server registered
   it. Watching from now on is the normal case; historical backfill is the
   server's business.
