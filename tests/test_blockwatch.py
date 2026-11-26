@@ -35,6 +35,8 @@ SOL_ADDRESS = "grsdZ8zj8RzuUiEeK2qKrTcd9CdJBxjVbxxAhHPzeFpY"
 # Shape-valid placeholders only: no real wallet keys belong in this repository.
 XMR_ADDRESS = "4" + "A" * 94
 XMR_VIEW_KEY = "ab" * 32
+LIGHTNING_ADDRESS = "watchdemo@blink.sv"
+BLINK_API_KEY = "blink_placeholder_read_only_key"
 FAKE_RATES = {"BTC": "100000", "LTC": "120", "DOGE": "0.4",
               "ETH": "4000", "SOL": "200", "XMR": "300"}
 
@@ -79,6 +81,15 @@ class AddressValidationTests(unittest.TestCase):
                              ("doge", "0abc")):
             with self.assertRaises(ValidationError):
                 validate_address(chain, value)
+
+    def test_lightning_address_is_canonicalised(self):
+        self.assertEqual(validate_address("lightning", "Kollof"),
+                         "kollof@blink.sv")
+        self.assertEqual(validate_address("lightning", "Kollof@BLINK.SV"),
+                         "kollof@blink.sv")
+        for value in ("kollof@example.com", "bad name", "@blink.sv", ".name@blink.sv"):
+            with self.assertRaises(ValidationError):
+                validate_address("lightning", value)
 
 
 class ConfigTests(TempFiles):
@@ -125,6 +136,25 @@ class ConfigTests(TempFiles):
         rendered = json.dumps(watch.status(self.config, self.state))
         self.assertNotIn(XMR_VIEW_KEY, rendered)
         self.assertNotIn("viewKey", rendered)
+
+    def test_lightning_needs_a_read_only_api_key(self):
+        with self.assertRaises(ValidationError):
+            add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS},
+                        self.config)
+        entry = add_address({"chain": "lightning", "address": "WatchDemo",
+                             "apiKey": BLINK_API_KEY}, self.config)
+        self.assertEqual(entry["address"], LIGHTNING_ADDRESS)
+        self.assertEqual(entry["id"], "lightning:" + LIGHTNING_ADDRESS)
+        self.assertEqual(entry["endpoint"], "https://api.blink.sv/graphql")
+
+    def test_lightning_key_is_not_in_status(self):
+        add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS,
+                     "apiKey": BLINK_API_KEY}, self.config)
+        result = watch.status(self.config, self.state)
+        rendered = json.dumps(result)
+        self.assertNotIn(BLINK_API_KEY, rendered)
+        self.assertNotIn("apiKey", rendered)
+        self.assertTrue(result["addresses"][0]["hasApiKey"])
 
 
 class ProviderParserTests(unittest.TestCase):
@@ -216,6 +246,92 @@ class ProviderParserTests(unittest.TestCase):
         self.assertEqual(snapshot.activities[0].kind, "activity")
 
 
+BLINK_RESPONSE = {
+    "data": {
+        "me": {
+            "username": "watchdemo",
+            "defaultAccount": {
+                "wallets": [
+                    {"__typename": "UsdWallet", "walletCurrency": "USD",
+                     "balance": 1200},
+                    {"__typename": "BTCWallet", "walletCurrency": "BTC",
+                     "balance": 2500, "transactions": {"edges": [
+                         {"node": {
+                             "id": "tx-new", "status": "SUCCESS",
+                             "direction": "RECEIVE", "settlementAmount": 1500,
+                             "createdAt": 1700000000,
+                             "initiationVia": {"__typename": "InitiationViaLn"},
+                         }},
+                         {"node": {
+                             "id": "tx-pending", "status": "PENDING",
+                             "direction": "RECEIVE", "settlementAmount": 50,
+                             "createdAt": 1700000100,
+                             "initiationVia": {"__typename": "InitiationViaLn"},
+                         }},
+                         {"node": {
+                             "id": "tx-send", "status": "SUCCESS",
+                             "direction": "SEND", "settlementAmount": -300,
+                             "createdAt": 1699999000,
+                             "initiationVia": {"__typename": "InitiationViaOnChain"},
+                         }},
+                         {"node": {
+                             "id": "tx-failed", "status": "FAILURE",
+                             "direction": "RECEIVE", "settlementAmount": 99,
+                             "createdAt": 1699998000,
+                             "initiationVia": {"__typename": "InitiationViaLn"},
+                         }},
+                     ]}},
+                ]
+            },
+        }
+    }
+}
+
+
+class BlinkProviderTests(unittest.TestCase):
+    def entry(self):
+        return {
+            "chain": "lightning",
+            "address": LIGHTNING_ADDRESS,
+            "apiKey": BLINK_API_KEY,
+            "endpoint": "https://api.blink.sv/graphql",
+        }
+
+    def test_wallet_balance_and_settled_transactions(self):
+        with mock.patch("blockwatch.providers.http.request_json",
+                        return_value=BLINK_RESPONSE) as request:
+            snapshot = providers._fetch_blink(self.entry(),
+                                              providers.CHAINS["lightning"])
+        self.assertEqual(snapshot.balance_raw, "2500")
+        self.assertEqual([activity.id for activity in snapshot.activities],
+                         ["tx-new", "tx-send"])
+        self.assertEqual(snapshot.activities[0].kind, "in")
+        self.assertEqual(snapshot.activities[0].amount_raw, "1500")
+        self.assertEqual(snapshot.activities[0].note, "lightning")
+        self.assertEqual(snapshot.activities[1].kind, "out")
+        self.assertEqual(snapshot.activities[1].amount_raw, "300")
+        self.assertEqual(snapshot.activities[1].note, "on-chain")
+        self.assertIn("1 pending", snapshot.note)
+        _, kwargs = request.call_args
+        self.assertEqual(kwargs["headers"]["X-API-KEY"], BLINK_API_KEY)
+        self.assertEqual(kwargs["method"], "POST")
+
+    def test_key_for_another_account_is_refused(self):
+        response = json.loads(json.dumps(BLINK_RESPONSE))
+        response["data"]["me"]["username"] = "someoneelse"
+        with mock.patch("blockwatch.providers.http.request_json",
+                        return_value=response):
+            with self.assertRaises(BlockwatchError):
+                providers._fetch_blink(self.entry(), providers.CHAINS["lightning"])
+
+    def test_graphql_error_is_a_readable_failure(self):
+        error = {"errors": [{"message": "Not authorized"}]}
+        with mock.patch("blockwatch.providers.http.request_json",
+                        return_value=error):
+            with self.assertRaisesRegex(BlockwatchError, "Not authorized"):
+                providers._fetch_blink(self.entry(), providers.CHAINS["lightning"])
+
+
 class UrlTests(unittest.TestCase):
     def test_https_allowed(self):
         self.assertEqual(http.checked_url("https://mempool.space"),
@@ -284,6 +400,30 @@ class PollTests(TempFiles):
         self.assertEqual(len(report["events"]), 1)
         self.assertEqual(report["events"][0]["kind"], "in")
         self.assertEqual(report["events"][0]["amount"], "0.000005")
+
+    def test_lightning_balance_is_priced_as_btc_and_events_use_sats(self):
+        add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS,
+                     "apiKey": BLINK_API_KEY}, self.config)
+        first = Snapshot(balance_raw="2500", activities=[
+            Activity("tx1", "in", "1500", True, True, "2026-11-20T00:00:00Z")])
+        with mock.patch("blockwatch.watch.fetch", return_value=first):
+            report = watch.poll(self.config, self.state)
+        row = report["addresses"][0]
+        self.assertEqual(row["symbol"], "sats")
+        self.assertEqual(row["balance"], "2500")
+        self.assertEqual(row["fiatValue"], "2.50")
+        self.assertTrue(row["hasApiKey"])
+        self.assertNotIn(BLINK_API_KEY, json.dumps(report))
+
+        second = Snapshot(balance_raw="3000", activities=[
+            Activity("tx2", "in", "500", True, True, "2026-11-21T00:00:00Z"),
+            Activity("tx1", "in", "1500", True, True, "2026-11-20T00:00:00Z")])
+        with mock.patch("blockwatch.watch.fetch", return_value=second):
+            report = watch.poll(self.config, self.state)
+        self.assertEqual([event["id"] for event in report["events"]], ["tx2"])
+        self.assertEqual(report["events"][0]["amount"], "500")
+        self.assertEqual(report["events"][0]["symbol"], "sats")
+        self.assertEqual(report["addresses"][0]["fiatValue"], "3.00")
 
     def test_failed_check_keeps_the_baseline(self):
         self.add_btc()
@@ -441,6 +581,25 @@ class UpdateTests(TempFiles):
         with self.assertRaises(BlockwatchError):
             update_address("btc:nope", {"label": "x"}, self.config)
 
+    def test_lightning_label_update_preserves_the_api_key(self):
+        entry = add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS,
+                             "apiKey": BLINK_API_KEY, "label": "Old"}, self.config)
+        _, updated = update_address(entry["id"], {"label": "New"}, self.config)
+        self.assertEqual(updated["apiKey"], BLINK_API_KEY)
+        self.assertEqual(updated["label"], "New")
+
+    def test_lightning_address_change_needs_a_new_api_key(self):
+        entry = add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS,
+                             "apiKey": BLINK_API_KEY}, self.config)
+        other = "someoneelse@blink.sv"
+        with self.assertRaises(ValidationError):
+            update_address(entry["id"], {"address": other}, self.config)
+        _, updated = update_address(entry["id"], {"address": other,
+                                                  "apiKey": BLINK_API_KEY + "_new"},
+                                    self.config)
+        self.assertEqual(updated["address"], other)
+        self.assertEqual(updated["apiKey"], BLINK_API_KEY + "_new")
+
 
 class ConfigLockTests(TempFiles):
     def test_mutation_waits_for_the_config_lock(self):
@@ -554,6 +713,29 @@ class CliCredentialTests(TempFiles):
         self.assertEqual(code, 0)
         updated = load_config(self.config)["addresses"][0]
         self.assertEqual(updated["apiKey"], "new-provider-token")
+
+    def test_update_replaces_a_key_from_the_environment_only_on_request(self):
+        add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS,
+                     "apiKey": BLINK_API_KEY}, self.config)
+        entry = load_config(self.config)["addresses"][0]
+        with mock.patch.dict(os.environ, {"BLOCKWATCH_API_KEY": "blink_new_key"}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main([
+                    "--config", self.config, "--state", self.state,
+                    "update", entry["id"], "--label", "Renamed",
+                ])
+            self.assertEqual(code, 0)
+            self.assertEqual(load_config(self.config)["addresses"][0]["apiKey"],
+                             BLINK_API_KEY)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main([
+                    "--config", self.config, "--state", self.state,
+                    "update", entry["id"], "--label", "Renamed again",
+                    "--api-key-from-env",
+                ])
+            self.assertEqual(code, 0)
+        self.assertEqual(load_config(self.config)["addresses"][0]["apiKey"],
+                         "blink_new_key")
 
 
 class ServerStatusTests(TempFiles):

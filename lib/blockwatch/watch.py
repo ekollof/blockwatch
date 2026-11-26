@@ -70,6 +70,12 @@ def _event_dict(activity, entry, chain, checked_at):
     }
 
 
+def _fiat_inputs(chain):
+    """Units and coin the fiat rate applies to (sats are priced as BTC)."""
+    decimals = chain.rate_decimals if chain.rate_decimals >= 0 else chain.decimals
+    return decimals, chain.rate_symbol or chain.symbol
+
+
 def _result(entry, chain, snapshot=None, error=None, initialized=False,
             events=None, truncated=0, previous=None, rates=None):
     balance_raw = snapshot.balance_raw if snapshot else (previous or {}).get("balanceRaw")
@@ -79,7 +85,8 @@ def _result(entry, chain, snapshot=None, error=None, initialized=False,
             balance = format_units(balance_raw, chain.decimals)
         except BlockwatchError:
             balance = None
-    fiat = fiat_fields(balance_raw, chain.decimals, chain.symbol, rates)
+    rate_decimals, rate_symbol = _fiat_inputs(chain)
+    fiat = fiat_fields(balance_raw, rate_decimals, rate_symbol, rates)
     result = {
         "id": entry["id"],
         "chain": chain.id,
@@ -90,6 +97,7 @@ def _result(entry, chain, snapshot=None, error=None, initialized=False,
         "mode": entry.get("mode"),
         "endpoint": entry.get("endpoint") if chain.id == "xmr" else None,
         "hasViewKey": bool(entry.get("viewKey")) if chain.id == "xmr" else False,
+        "hasApiKey": bool(entry.get("apiKey")),
         "balance": balance,
         "balanceRaw": balance_raw,
         "balanceLabel": snapshot.balance_label if snapshot else "balance",
@@ -260,7 +268,8 @@ def poll(config_path=None, state_path=None, fiat="USD"):
 
 def _stored_address(entry, last, stored, rates):
     chain = CHAINS[entry["chain"]]
-    fiat = fiat_fields(last.get("balanceRaw"), chain.decimals, chain.symbol, rates)
+    rate_decimals, rate_symbol = _fiat_inputs(chain)
+    fiat = fiat_fields(last.get("balanceRaw"), rate_decimals, rate_symbol, rates)
     return {
         "id": entry["id"],
         "chain": chain.id,
@@ -271,6 +280,7 @@ def _stored_address(entry, last, stored, rates):
         "mode": entry.get("mode"),
         "endpoint": entry.get("endpoint") if chain.id == "xmr" else None,
         "hasViewKey": bool(entry.get("viewKey")) if chain.id == "xmr" else False,
+        "hasApiKey": bool(entry.get("apiKey")),
         "balance": last.get("balance"),
         "balanceRaw": last.get("balanceRaw"),
         "balanceLabel": last.get("balanceLabel", "balance"),

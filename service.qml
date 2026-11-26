@@ -130,7 +130,7 @@ Item {
     widgetCount = Math.max(0, widgetCount - 1)
   }
 
-  function addAddress(chain, address, label, viewKey, mode, endpoint) {
+  function addAddress(chain, address, label, viewKey, mode, endpoint, apiKey) {
     queueMutation("add", {
       chain: chain,
       address: address,
@@ -138,10 +138,11 @@ Item {
       viewKey: viewKey,
       mode: mode,
       endpoint: endpoint,
+      apiKey: apiKey,
     })
   }
 
-  function updateAddress(id, chain, address, label, viewKey, mode, endpoint) {
+  function updateAddress(id, chain, address, label, viewKey, mode, endpoint, apiKey) {
     queueMutation("update", {
       id: id,
       chain: chain,
@@ -150,6 +151,7 @@ Item {
       viewKey: viewKey,
       mode: mode,
       endpoint: endpoint,
+      apiKey: apiKey,
     })
   }
 
@@ -178,6 +180,8 @@ Item {
     if (actionRun.running || actionBusy) return
     var args = []
     var viewKey = ""
+    var apiKey = String(data.apiKey || "").trim()
+    var apiKeyFlag = apiKey !== "" ? ["--api-key-from-env"] : []
     if (kind === "add") {
       args = baseCommand.concat(["add", "--chain", String(data.chain),
                                  "--address", String(data.address)])
@@ -187,6 +191,7 @@ Item {
         args = args.concat(["--mode", String(data.mode)])
       if (String(data.endpoint || "").trim() !== "")
         args = args.concat(["--endpoint", String(data.endpoint).trim()])
+      args = args.concat(apiKeyFlag)
       viewKey = data.viewKey
     } else if (kind === "update") {
       args = baseCommand.concat([
@@ -199,6 +204,7 @@ Item {
         args = args.concat(["--mode", String(data.mode)])
       if (String(data.endpoint || "").trim() !== "")
         args = args.concat(["--endpoint", String(data.endpoint).trim()])
+      args = args.concat(apiKeyFlag)
       viewKey = data.viewKey
     } else if (kind === "remove") {
       args = baseCommand.concat(["remove", String(data.id)])
@@ -209,7 +215,10 @@ Item {
     actionTarget = String(data.label || data.address || data.id || "")
     actionError = ""
     actionBusy = true
-    actionRun.environment = { "BLOCKWATCH_VIEW_KEY": String(viewKey || "").trim() }
+    actionRun.environment = {
+      "BLOCKWATCH_VIEW_KEY": String(viewKey || "").trim(),
+      "BLOCKWATCH_API_KEY": apiKey
+    }
     actionRun.command = args
     actionRun.start()
   }

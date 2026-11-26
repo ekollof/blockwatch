@@ -61,6 +61,7 @@ class ManifestTests(unittest.TestCase):
         self.assertNotIn('"--api-key"', source)
         self.assertNotIn('"--rpc-password"', source)
         self.assertIn("BLOCKWATCH_VIEW_KEY", source)
+        self.assertIn("BLOCKWATCH_API_KEY", source)
 
     def test_notification_text_neutralizes_markup(self):
         with open(os.path.join(ROOT, "service.qml"), encoding="utf-8") as handle:

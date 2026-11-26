@@ -79,7 +79,10 @@ BarWidget {
 
   property bool panelOpen: false
   onPanelOpenChanged: {
-    if (!panelOpen) root.addViewKey = ""
+    if (!panelOpen) {
+      root.addViewKey = ""
+      root.addApiKey = ""
+    }
   }
   property double nowTick: Date.now()
 
@@ -88,6 +91,7 @@ BarWidget {
   property string addAddress: ""
   property string addLabel: ""
   property string addViewKey: ""
+  property string addApiKey: ""
   property string addEndpoint: ""
   property string addXmrMode: "lws"
   property string addServerId: ""
@@ -96,6 +100,7 @@ BarWidget {
   property string editingAddress: ""
   property string editingChain: ""
   property bool editingHasViewKey: false
+  property bool editingHasApiKey: false
 
   readonly property bool editing: editingId !== ""
   readonly property bool editTargetChanged: editing
@@ -110,6 +115,9 @@ BarWidget {
   }
   onAddViewKeyChanged: {
     if (viewKeyField.text !== root.addViewKey) viewKeyField.text = root.addViewKey
+  }
+  onAddApiKeyChanged: {
+    if (apiKeyField.text !== root.addApiKey) apiKeyField.text = root.addApiKey
   }
   onAddEndpointChanged: {
     if (endpointField.text !== root.addEndpoint) endpointField.text = root.addEndpoint
@@ -341,6 +349,7 @@ BarWidget {
     case "eth": return "0x…"
     case "sol": return "base58 address"
     case "xmr": return "4… (main address)"
+    case "lightning": return "name@blink.sv"
     }
     return ""
   }
@@ -353,8 +362,9 @@ BarWidget {
       root.addXmrMode = "lws"
       root.addEndpoint = ""
       root.addServerId = ""
-      return
     }
+    if (id !== "lightning") root.addApiKey = ""
+    if (id !== "xmr") return
     root.addXmrMode = "lws"
     root.addServerId = ""
     root.addEndpoint = ""
@@ -369,6 +379,7 @@ BarWidget {
     root.addAddress = ""
     root.addLabel = ""
     root.addViewKey = ""
+    root.addApiKey = ""
     root.addEndpoint = ""
     root.addError = ""
     root.addXmrMode = "lws"
@@ -377,6 +388,7 @@ BarWidget {
     root.editingAddress = ""
     root.editingChain = ""
     root.editingHasViewKey = false
+    root.editingHasApiKey = false
   }
 
   function openAddForm() {
@@ -391,10 +403,12 @@ BarWidget {
     root.editingAddress = String(entry.address || "")
     root.editingChain = String(entry.chain || "btc")
     root.editingHasViewKey = entry.hasViewKey === true
+    root.editingHasApiKey = entry.hasApiKey === true
     root.addChain = String(entry.chain || "btc")
     root.addAddress = String(entry.address || "")
     root.addLabel = String(entry.label || "")
     root.addViewKey = ""
+    root.addApiKey = ""
     root.addXmrMode = String(entry.mode || "lws")
     root.addEndpoint = String(entry.endpoint || "")
     root.addServerId = ""
@@ -427,12 +441,20 @@ BarWidget {
       root.addError = strings.t("popup.viewKeyMissing")
       return
     }
+    var keepsApiKey = root.editing && root.editingHasApiKey && !root.editTargetChanged
+    if (root.addChain === "lightning" && !keepsApiKey
+        && String(root.addApiKey || "").trim() === "") {
+      root.addError = strings.t("popup.apiKeyMissing")
+      return
+    }
     if (root.editing) {
       backend.updateAddress(root.editingId, root.addChain, address, root.addLabel,
-                            root.addViewKey, mode, root.addEndpoint)
+                            root.addViewKey, mode, root.addEndpoint,
+                            root.addApiKey)
     } else {
       backend.addAddress(root.addChain, address, root.addLabel,
-                         root.addViewKey, mode, root.addEndpoint)
+                         root.addViewKey, mode, root.addEndpoint,
+                         root.addApiKey)
     }
   }
 
@@ -845,6 +867,33 @@ BarWidget {
                ? strings.t("popup.viewKeyKeep") : strings.t("popup.viewKeyHint"))
           color: root.addChain === "xmr" && root.addXmrMode === "lws"
             && !(root.editing && root.editingHasViewKey && !root.editTargetChanged)
+            ? Commons.Color.urgent : root.faint
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        TextField {
+          id: apiKeyField
+          width: parent.width
+          visible: root.addChain === "lightning"
+          placeholderText: strings.t("popup.apiKey")
+          password: true
+          foreground: root.foreground
+          text: root.addApiKey
+          onTextChanged: root.addApiKey = text
+          Keys.onReturnPressed: root.submitAdd()
+          Keys.onEnterPressed: root.submitAdd()
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          visible: root.addChain === "lightning"
+          text: root.editing && root.editingHasApiKey && !root.editTargetChanged
+            ? strings.t("popup.apiKeyKeep") : strings.t("popup.apiKeyHint")
+          color: root.addChain === "lightning"
+            && !(root.editing && root.editingHasApiKey && !root.editTargetChanged)
             ? Commons.Color.urgent : root.faint
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

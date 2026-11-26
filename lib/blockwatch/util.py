@@ -146,7 +146,8 @@ def short_hash(value, length=12):
 
 def address_key(chain, address):
     """Stable id for one watched address across config and state."""
-    return f"{chain}:{address.strip().lower() if chain in ('eth', 'sol') else address.strip()}"
+    lowered = chain in ("eth", "sol", "lightning")
+    return f"{chain}:{address.strip().lower() if lowered else address.strip()}"
 
 
 def clean_label(value, fallback=""):
@@ -179,6 +180,27 @@ _BECH32 = re.compile(r"^(bc1|ltc1|tb1)[02-9ac-hj-np-z]{6,87}$")
 _ETH = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _XMR = re.compile(r"^[48][1-9A-HJ-NP-Za-km-z]{94}$")
 _VIEW_KEY = re.compile(r"^[0-9a-fA-F]{64}$")
+_LIGHTNING_LOCAL = re.compile(r"^[a-z0-9._+-]{1,64}$")
+LIGHTNING_DOMAIN = "blink.sv"
+
+
+def validate_lightning_address(value):
+    """A Blink Lightning address, canonicalised to name@blink.sv.
+
+    The address is only an identity for the watched account: the API key
+    decides which wallet is read. A bare username is accepted and expanded.
+    """
+    value = text(value, "Lightning address", limit=200)
+    if "@" in value:
+        local, _, domain = value.rpartition("@")
+        if domain.lower() != LIGHTNING_DOMAIN:
+            raise ValidationError(f"a Blink Lightning address ends in @{LIGHTNING_DOMAIN}")
+    else:
+        local = value
+    local = local.strip().lower()
+    if not _LIGHTNING_LOCAL.match(local) or local[0] in ".-+" or local[-1] in ".-+":
+        raise ValidationError("not a Blink Lightning address (name@blink.sv)")
+    return f"{local}@{LIGHTNING_DOMAIN}"
 
 
 def validate_address(chain, address):
@@ -211,6 +233,8 @@ def validate_address(chain, address):
         if _XMR.match(address):
             return address
         raise ValidationError("not a Monero mainnet address")
+    if chain == "lightning":
+        return validate_lightning_address(address)
     raise ValidationError(f"unsupported chain {chain}")
 
 

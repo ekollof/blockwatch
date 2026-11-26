@@ -39,6 +39,10 @@ class Chain:
     endpoint: str
     needs_view_key: bool = False
     note: str = ""
+    needs_api_key: bool = False
+    # Some units are not a CoinGecko coin of their own (sats is BTC/1e8).
+    rate_symbol: str = ""
+    rate_decimals: int = -1
 
 
 CHAINS = {
@@ -58,6 +62,13 @@ CHAINS = {
         Chain("xmr", "Monero", "XMR", 12, "lws", "https://lws.monero.fail",
               needs_view_key=True,
               note="Monero hides addresses; watching needs the private view key."),
+        Chain("lightning", "Lightning", "sats", 0, "blink",
+              "https://api.blink.sv/graphql",
+              needs_api_key=True,
+              note="Blink BTC wallet by read-only API key; Lightning and on-chain "
+                   "receipts. Blink holds the funds.",
+              rate_symbol="BTC",
+              rate_decimals=8),
     )
 }
 
@@ -178,6 +189,8 @@ def normalize_entry(raw, index=None):
     if chain.needs_view_key and mode != "wallet-rpc" and "viewKey" not in secrets:
         raise ValidationError(
             f"{where} needs the Monero private view key, or mode 'wallet-rpc'")
+    if chain.needs_api_key and "apiKey" not in secrets:
+        raise ValidationError(f"{where} needs a read-only API key")
 
     entry = {
         "id": address_key(chain_id, address),
@@ -567,6 +580,7 @@ def chain_list():
             "symbol": chain.symbol,
             "decimals": chain.decimals,
             "needsViewKey": chain.needs_view_key,
+            "needsApiKey": chain.needs_api_key,
             "note": chain.note,
             "endpoint": chain.endpoint,
         }

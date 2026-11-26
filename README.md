@@ -4,10 +4,10 @@
 
 # Blockwatch
 
-A read-only address watcher for the Omarchy bar. Blockwatch watches BTC, LTC,
-DOGE, ETH, SOL and XMR addresses and tells you when an address is credited or
-debited. It is not a wallet: it holds no spend key, cannot sign, and never
-sends a transaction.
+A read-only watch list for the Omarchy bar. Blockwatch watches BTC, LTC,
+DOGE, ETH, SOL and XMR addresses, and a Blink Lightning wallet, and tells you
+when value is credited or debited. It is not a wallet: it holds no spend key,
+cannot sign, and never sends a transaction.
 
 <p align="center">
   <img src="preview.png" width="420" alt="Blockwatch panel with four fictional watches and USD estimates">
@@ -20,6 +20,8 @@ sends a transaction.
 - Checks the watch list on a timer (default every 120 seconds) and on network
   reconnect.
 - Sends a desktop notification for new credit or debit activity.
+- Watches a Blink BTC wallet over its read-only API, so Lightning receipts show
+  up as sats even though they never touch the on-chain address history.
 - Shows each watched address, its native balance (or, for Monero, the amount
   received), a selectable fiat estimate, the last event and any provider error
   in a panel.
@@ -44,6 +46,7 @@ sends a transaction.
 | ETH | [Blockscout](https://eth.blockscout.com) | Native ETH transfers only; tokens are not followed. |
 | SOL | Solana JSON-RPC | Public signatures and balance; no key needed. |
 | XMR | [monero-lws](https://github.com/vtnerd/monero-lws) or `monero-wallet-rpc` | Needs the private **view** key. See below. |
+| Lightning | [Blink](https://blink.sv) account API | Needs a read-only API key. Custodial: Blink holds the sats. See below. |
 | Fiat rates | [CoinGecko](https://www.coingecko.com/en/api) | One cached request per five minutes; sends coin symbols and the selected currency, never addresses. |
 
 The endpoint for one address can be overridden in the config file, so a
@@ -64,8 +67,10 @@ checks the manifest; `omarchy agent look plugin` renders the bar icon.
 ## Add an address
 
 Click the eye, choose **Watch an address**, pick the chain and paste the
-public address. A label is optional. **Click a row to edit its label,
-address, server or Monero mode**; the trash button stops watching it.
+public address. A label is optional. For **sats**, paste your
+`name@blink.sv` and a read-only Blink API key instead of an address. **Click a
+row to edit its label, address, server, Monero mode or Blink key**; the trash
+button stops watching it.
 
 The same operations are available without the UI:
 
@@ -75,6 +80,8 @@ BW=~/.config/omarchy/plugins/io.github.ekollof.blockwatch/bin/blockwatch
 $BW add --chain btc --address bc1q... --label "Cold storage"
 $BW add --chain eth --address 0x... --label "Treasury"
 $BW add --chain doge --address D...   # set BLOCKWATCH_API_KEY first
+$BW add --chain lightning --address name@blink.sv \
+    --label "Phone sats"             # set BLOCKWATCH_API_KEY first
 $BW list
 $BW update btc:bc1q... --label "Deep cold storage"
 $BW update btc:bc1q... --address bc1q... --label "Replaced device"
@@ -107,7 +114,10 @@ Environment API/RPC credentials apply when **adding** a watch. An `update` does
 not reapply a global `BLOCKWATCH_API_KEY`/`BLOCKWATCH_RPC_*` to a changed
 endpoint: pass the new provider's credential explicitly with `--api-key` /
 `--rpc-user` / `--rpc-password` (or edit the `0600` config), so a token chosen
-for one provider cannot follow an endpoint change to another.
+for one provider cannot follow an endpoint change to another. The panel rotates
+a Blink key by exporting it as `BLOCKWATCH_API_KEY` and passing
+`--api-key-from-env`, an explicit "use this new key" signal; the key itself
+never appears in argv.
 
 Custom XMR servers are remembered automatically when a watch using one is
 saved. They can also be managed directly:
@@ -122,7 +132,50 @@ The helper stores its watch list in `~/.config/blockwatch/config.json`
 (`$XDG_CONFIG_HOME/blockwatch/config.json`) and its state in
 `~/.local/state/blockwatch/state.json`
 (`$XDG_STATE_HOME/blockwatch/state.json`). Both are created with mode `0600`,
-and the directories with `0700`, because a Monero view key is a secret.
+and the directories with `0700`, because a Monero view key or Blink API key is
+a secret.
+
+## Lightning: reading sats from Blink
+
+**A Bitcoin address cannot see Lightning payments.** Lightning receipts settle
+off-chain, so they never appear in mempool.space or in the address history of
+a wallet. The authoritative record is the wallet that received the invoice.
+
+Blockwatch reads that record from a **Blink** account with a read-only API
+key. It shows the BTC wallet balance in sats, lists settled Lightning,
+on-chain and Blink-to-Blink receipts into that wallet, and notifies once per
+new transaction. It never creates an invoice, pays, or changes channels.
+
+Blink is **custodial**: Blink holds the keys and the sats. The API key is
+read-only (the `Read` scope), so it can see history and balances but cannot
+send. If you would rather not trust a custodian, run your own node and use a
+provider with a read-only node credential instead; Blockwatch does not ship
+one yet.
+
+Set it up once:
+
+1. Sign in at [dashboard.blink.sv](https://dashboard.blink.sv) with the same
+   account as the Blink app on your phone. Claim a username; your Lightning
+   address is `username@blink.sv`.
+2. Open **API keys**, create a key with **Read** only, and copy it.
+3. In the panel choose **sats**, enter `username@blink.sv` and paste the key.
+   Or from a shell:
+
+```bash
+read -rsp "Blink read-only key: " BLOCKWATCH_API_KEY; echo; export BLOCKWATCH_API_KEY
+$BW add --chain lightning --address name@blink.sv --label "Phone sats"
+```
+
+The watch stores the key in the `0600` config and sends it only to
+`https://api.blink.sv/graphql` as `X-API-KEY`. The username in the address is
+checked against the account the key belongs to, so a key pasted for the wrong
+account is refused instead of silently watching someone else's balance.
+
+Only **settled** transactions notify; a pending invoice is counted in the row
+note instead, so a payment that fails does not produce a false receipt. The
+BTC wallet balance includes on-chain receipts into Blink as well; each event's
+note says whether it arrived by Lightning, on-chain or from another Blink
+user. Fiat estimates price sats at the BTC rate.
 
 ## Monero: what actually works
 
@@ -234,6 +287,14 @@ The panel covers the common case. The config file exposes the rest:
       "endpoint": "http://127.0.0.1:18083/json_rpc",
       "authUser": "optional",
       "authPass": "optional"
+    },
+    {
+      "id": "lightning:name@blink.sv",
+      "chain": "lightning",
+      "address": "name@blink.sv",
+      "label": "Phone sats",
+      "endpoint": "https://api.blink.sv/graphql",
+      "apiKey": "blink-read-only-key"
     }
   ],
   "servers": [
@@ -256,13 +317,13 @@ Per-address keys:
 
 | Key | Meaning |
 | --- | --- |
-| `chain` | One of `btc`, `ltc`, `doge`, `eth`, `sol`, `xmr`. |
-| `address` | The public address. |
+| `chain` | One of `btc`, `ltc`, `doge`, `eth`, `sol`, `xmr`, `lightning`. |
+| `address` | The public address, or the Blink Lightning address (`name@blink.sv`). |
 | `label` | Optional display name, at most 80 characters. |
 | `endpoint` | Optional provider override. HTTPS required, except loopback for wallet RPC. |
 | `viewKey` | Monero private view key (64 hex). Required for `lws`, not for `wallet-rpc`. |
 | `mode` | Monero only: `lws` or `wallet-rpc`. |
-| `apiKey` | Optional BlockCypher token (or a bearer token for a Solana RPC). |
+| `apiKey` | BlockCypher token, a bearer token for a Solana RPC, or a Blink read-only API key. |
 | `authUser`, `authPass` | Optional basic auth for `monero-wallet-rpc`. |
 
 Keep `id` consistent with `chain:address`; the helper recomputes it when
@@ -290,6 +351,9 @@ and native balances continue to update if CoinGecko is unavailable.
   detail is not public) produces one balanced-change event.
 - Monero light wallet servers report *received* totals; Blockwatch does not
   turn that into a spendable balance.
+- A Lightning watch reports settled Blink BTC-wallet transactions and the
+  wallet balance in sats; pending invoices are only counted in the note, so a
+  failed payment never becomes a false receipt.
 - Solana exposes signatures but not recipient amounts through the cheap RPC
   call, so a single new signature is shown with the **net balance delta**; a
   burst is shown as activity.
@@ -301,7 +365,8 @@ and native balances continue to update if CoinGecko is unavailable.
 
 - **Read-only by construction.** No spend key, no seed, no signing, no
   broadcast, no send/receive UI. Monero uses the private *view* key, which
-  can only reveal incoming payments.
+  can only reveal incoming payments. A Blink key is created with the `Read`
+  scope only; it can list balances and history but cannot pay.
 - No telemetry, analytics or crash reporting. Outbound requests go only to the
   provider or server shown for each watched address.
 - The fiat-rate request goes to CoinGecko and contains only the fixed coin
@@ -312,6 +377,11 @@ and native balances continue to update if CoinGecko is unavailable.
 - A Monero view key is sent only to the configured light wallet server (or
   stays local with `wallet-rpc`). Treat a third-party LWS as you would any
   other service that can see your incoming history.
+- A Blink API key is sent only to `api.blink.sv` and stored in the `0600`
+  config. A key with the `Read` scope can see your whole Blink history, so
+  treat it like a password and do not reuse an admin or `Write` key. Blink is
+  custodial: using it means trusting Blink with the sats, which is a different
+  trade-off from watching a self-custody address.
 - Custom XMR server URLs are stored in the config and shown in the form. Do
   not put credentials or tokens in those URLs; `wallet-rpc` has separate
   `authUser`/`authPass` fields for Basic auth.
@@ -371,6 +441,12 @@ real helper/config on exit.
 - Blockwatch speaks HTTPS directly and does not ship a Tor transport, so the
   onion-only LWS endpoints cannot be selected; use a clearnet LWS you trust or
   a local `monero-lws`.
+- Lightning watches need a Blink account with a username and a `Read` API key.
+  The watch sees the Blink BTC wallet, so an on-chain receipt into Blink is
+  listed too. Removing the key in Blink stops the watch at its next poll.
+  Cake Wallet's built-in Lightning (Spark) has no account API, so it cannot be
+  read this way; a wallet whose history lives only on the phone is invisible
+  to any desktop watcher.
 
 ## Uninstall
 

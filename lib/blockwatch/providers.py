@@ -21,7 +21,7 @@ from typing import Optional
 from . import http
 from .config import CHAINS, Chain
 from .util import (BlockwatchError, ValidationError, bool_value, digit_string,
-                   int_value, iso_from_string, iso_utc, require_dict,
+                   int_value, iso_from_string, iso_utc, plain, require_dict,
                    require_list, text)
 
 MAX_ACTIVITIES = 25
@@ -61,6 +61,8 @@ def fetch(entry):
         return _fetch_blockscout(entry, chain)
     if chain.provider == "solana":
         return _fetch_solana(entry, chain)
+    if chain.provider == "blink":
+        return _fetch_blink(entry, chain)
     if chain.provider == "lws":
         if entry.get("mode") == "wallet-rpc":
             return _fetch_xmr_rpc(entry)
@@ -400,6 +402,165 @@ def _fetch_solana(entry, chain):
         activities=activities[:MAX_ACTIVITIES],
         fingerprint=_fingerprint(balance, *[a.id for a in activities[:10]]),
         note=note,
+    )
+
+
+# -- Lightning: Blink (read-only account API) ------------------------------
+
+# One query returns the account's wallets, the BTC wallet balance and its
+# newest transactions. Blink serialises amounts as signed minor units (sats for
+# a BTC wallet), which is exactly what Blockwatch stores, so nothing is scaled
+# here. Only the BTC wallet is read; a USD wallet is ignored.
+BLINK_QUERY = """
+query blockwatch($first: Int!) {
+  me {
+    username
+    defaultAccount {
+      wallets {
+        __typename
+        ... on BTCWallet {
+          balance
+          walletCurrency
+          transactions(first: $first) {
+            edges {
+              node {
+                id
+                status
+                direction
+                settlementAmount
+                createdAt
+                initiationVia { __typename }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+BLINK_INITIATION_NOTES = {
+    "InitiationViaLn": "lightning",
+    "InitiationViaOnChain": "on-chain",
+    "InitiationViaIntraLedger": "blink transfer",
+}
+
+
+def _blink_integer(value, what):
+    """A signed minor-unit amount or epoch, as an int (the API may quote it)."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValidationError(f"{what} is not an integer")
+    rendered = str(value).strip()
+    sign = 1
+    if rendered.startswith("-"):
+        sign, rendered = -1, rendered[1:]
+    if not rendered or len(rendered) > 80 or not rendered.isdigit():
+        raise ValidationError(f"{what} is not an integer")
+    return sign * int(rendered)
+
+
+def _blink_id(value):
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValidationError("transaction id is not text")
+    return text(str(value), "transaction id", limit=200)
+
+
+def _blink_request(entry, variables):
+    endpoint = (entry.get("endpoint") or CHAINS["lightning"].endpoint).rstrip("/")
+    headers = {"X-API-KEY": entry["apiKey"]}
+    document = require_dict(
+        http.request_json(endpoint, method="POST", headers=headers, timeout=20,
+                          payload={"query": BLINK_QUERY, "variables": variables}),
+        "Blink response")
+    errors = document.get("errors")
+    if isinstance(errors, list) and errors:
+        first = errors[0]
+        message = first.get("message") if isinstance(first, dict) else None
+        raise BlockwatchError(plain(message, 200) or "Blink rejected the request")
+    return require_dict(document.get("data"), "Blink data")
+
+
+def _blink_activity(node):
+    node = require_dict(node, "transaction")
+    if text(node.get("status"), "status", limit=20) != "SUCCESS":
+        return None
+    direction = text(node.get("direction"), "direction", limit=20)
+    if direction == "RECEIVE":
+        kind = "in"
+    elif direction == "SEND":
+        kind = "out"
+    else:
+        kind = "activity"
+    amount = abs(_blink_integer(node.get("settlementAmount"), "settlement amount"))
+    initiation = node.get("initiationVia")
+    type_name = initiation.get("__typename") if isinstance(initiation, dict) else ""
+    return Activity(
+        id=_blink_id(node.get("id")),
+        kind=kind,
+        amount_raw=str(amount),
+        confirmed=True,
+        timestamp=iso_utc(node.get("createdAt")),
+        note=BLINK_INITIATION_NOTES.get(type_name, ""),
+    )
+
+
+def _fetch_blink(entry, chain):
+    data = _blink_request(entry, {"first": MAX_ACTIVITIES})
+    me = require_dict(data.get("me"), "account")
+    username = me.get("username")
+    if isinstance(username, str) and username.strip():
+        expected = entry["address"].split("@", 1)[0]
+        if username.strip().lower() != expected:
+            raise BlockwatchError("this Blink API key belongs to a different account")
+
+    account = require_dict(me.get("defaultAccount"), "default account")
+    wallets = require_list(account.get("wallets") or [], "wallets", limit=10)
+    wallet = next((item for item in wallets
+                   if isinstance(item, dict) and item.get("walletCurrency") == "BTC"),
+                  None)
+    if wallet is None:
+        raise BlockwatchError("this Blink account has no BTC wallet")
+
+    balance = max(0, _blink_integer(wallet.get("balance"), "balance"))
+    connection = wallet.get("transactions")
+    edges = []
+    if connection is not None:
+        edges = require_list(
+            require_dict(connection, "transactions").get("edges") or [],
+            "transactions", limit=200)
+
+    activities = []
+    pending = 0
+    skipped = 0
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        node = edge.get("node")
+        if not isinstance(node, dict):
+            continue
+        if node.get("status") == "PENDING":
+            pending += 1
+            continue
+        try:
+            activity = _blink_activity(node)
+        except ValidationError:
+            skipped += 1
+            continue
+        if activity is not None:
+            activities.append(activity)
+
+    notes = ["Blink BTC wallet; on-chain receipts included"]
+    if pending:
+        notes.append(f"{pending} pending")
+    if skipped:
+        notes.append(f"{skipped} transaction(s) could not be read")
+    latest = activities[0].id if activities else ""
+    return Snapshot(
+        balance_raw=str(balance),
+        activities=activities[:MAX_ACTIVITIES],
+        fingerprint=_fingerprint(balance, latest, len(activities)),
+        note=", ".join(notes),
     )
 
 

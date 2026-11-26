@@ -47,6 +47,8 @@ def _parser():
                      help="Monero source; default is the configured light wallet server")
     add.add_argument("--endpoint", default="", help="override the provider endpoint")
     add.add_argument("--api-key", default="", help="provider API key, if required")
+    add.add_argument("--api-key-from-env", action="store_true",
+                     help="read the API key from BLOCKWATCH_API_KEY (never argv)")
     add.add_argument("--rpc-user", default="", help="monero-wallet-rpc basic auth user")
     add.add_argument("--rpc-password", default="", help="monero-wallet-rpc basic auth password")
 
@@ -61,6 +63,8 @@ def _parser():
     update.add_argument("--mode", choices=("lws", "wallet-rpc"), default=None)
     update.add_argument("--endpoint", default=None)
     update.add_argument("--api-key", default=None)
+    update.add_argument("--api-key-from-env", action="store_true",
+                        help="replace the API key with BLOCKWATCH_API_KEY")
     update.add_argument("--rpc-user", default=None)
     update.add_argument("--rpc-password", default=None)
 
@@ -92,6 +96,7 @@ def _public_entry(entry):
     if entry.get("chain") == "xmr":
         out["endpoint"] = entry.get("endpoint") or ""
         out["hasViewKey"] = bool(entry.get("viewKey"))
+    out["hasApiKey"] = bool(entry.get("apiKey"))
     return out
 
 
@@ -148,8 +153,12 @@ def _run(args):
         view_key = args.view_key or os.environ.get("BLOCKWATCH_VIEW_KEY") or None
         # Provider credentials are endpoint-bound. Do not reapply a global
         # environment token to a different endpoint on an update; require an
-        # explicit --api-key/--rpc-* choice for the new provider.
+        # explicit --api-key/--rpc-* choice for the new provider. The panel
+        # says "I typed a key" with --api-key-from-env, so only that flag
+        # reads the environment here.
         api_key = args.api_key
+        if api_key is None and args.api_key_from_env:
+            api_key = os.environ.get("BLOCKWATCH_API_KEY") or None
         rpc_user = args.rpc_user
         rpc_pass = args.rpc_password
         raw = {
