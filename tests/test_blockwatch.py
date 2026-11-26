@@ -229,6 +229,30 @@ class ProviderParserTests(unittest.TestCase):
         self.assertEqual(activity.kind, "in")
         self.assertEqual(activity.amount_raw, "2910210000")
 
+    def test_lws_empty_wallet_names_the_scan_start(self):
+        info = {
+            "total_received": "0",
+            "total_sent": "0",
+            "scanned_block_height": 3815001,
+            "blockchain_height": 3815001,
+            "start_height": 3812946,
+        }
+        received, _, progress, notes = providers._lws_summary(info)
+        self.assertEqual(received, "0")
+        self.assertEqual(progress, 100)
+        self.assertTrue(any("block 3812946" in note for note in notes))
+
+    def test_lws_wallet_with_receipts_has_no_scan_start_note(self):
+        info = {
+            "total_received": "1000000000000",
+            "total_sent": "0",
+            "scanned_block_height": 3815001,
+            "blockchain_height": 3815001,
+            "start_height": 3812946,
+        }
+        _, _, _, notes = providers._lws_summary(info)
+        self.assertFalse(any("began scanning" in note for note in notes))
+
     @mock.patch("blockwatch.providers._solana_rpc")
     def test_solana_signatures_become_activity(self, rpc):
         rpc.side_effect = [{"value": 42}, [{

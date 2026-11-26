@@ -631,10 +631,15 @@ def _lws_summary(info):
     sent = digit_string(info.get("total_sent"), "total sent")
     scanned = int_value(info.get("scanned_block_height"), "scanned height")
     height = int_value(info.get("blockchain_height"), "blockchain height")
+    start = int_value(info.get("start_height") or 0, "start height")
     progress = 100 if height <= 0 else min(100, int(scanned * 100 / height))
     notes = []
     if progress < 100:
         notes.append(f"server scanning ({progress}%)")
+    if received == "0" and start > 0:
+        # An LWS starts at registration, not at the wallet's first payment;
+        # saying so turns a bare 0 into an explanation.
+        notes.append(f"no receipts since the server began scanning at block {start}")
     notes.append("view key cannot prove outgoing spends")
     return received, sent, progress, notes
 
