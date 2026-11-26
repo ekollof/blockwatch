@@ -211,9 +211,9 @@ def _blockbook_url(endpoint, wallet):
     url = http.with_query(f"{base}/xpub/{http.path_segment(wallet)}",
                           "details", "txs")
     url = http.with_query(url, "pageSize", str(MAX_ACTIVITIES))
-    # "used" returns every derived address with a transaction, not only the
-    # ones that still hold a balance, so outgoing spends can be recognised.
-    return http.with_query(url, "tokens", "used")
+    # "derived" returns the gap addresses too, so inputs of an unconfirmed
+    # spend are recognised before Blockbook has marked the address as used.
+    return http.with_query(url, "tokens", "derived")
 
 
 def _blockbook_document(entry, chain, wallet):

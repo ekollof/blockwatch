@@ -406,7 +406,7 @@ class BlockbookProviderTests(unittest.TestCase):
         url = request.call_args.args[0]
         self.assertIn("/api/v2/xpub/", url)
         self.assertIn("details=txs", url)
-        self.assertIn("tokens=used", url)
+        self.assertIn("tokens=derived", url)
         self.assertIn("pageSize=25", url)
 
     def test_empty_wallet_is_a_zero_baseline(self):
