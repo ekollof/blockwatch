@@ -91,6 +91,21 @@ class AddressValidationTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 validate_address("lightning", value)
 
+    def test_bitcoin_wallet_accepts_xpub_and_descriptors(self):
+        xpub = "xpub" + "A" * 107
+        self.assertEqual(validate_address("btcwallet", xpub), xpub)
+        descriptor = f"wpkh({xpub}/0/*)"
+        self.assertEqual(validate_address("btcwallet", descriptor), descriptor)
+        self.assertEqual(validate_address("btcwallet", f"tr({xpub})"), f"tr({xpub})")
+
+    def test_bitcoin_wallet_refuses_private_keys_and_plain_addresses(self):
+        with self.assertRaisesRegex(ValidationError, "private key"):
+            validate_address("btcwallet", "xprv" + "A" * 107)
+        with self.assertRaises(ValidationError):
+            validate_address("btcwallet", BTC_ADDRESS)
+        with self.assertRaises(ValidationError):
+            validate_address("btcwallet", "xpub" + "A" * 107 + "()")
+
 
 class ConfigTests(TempFiles):
     def test_add_and_remove(self):
@@ -155,6 +170,14 @@ class ConfigTests(TempFiles):
         self.assertNotIn(BLINK_API_KEY, rendered)
         self.assertNotIn("apiKey", rendered)
         self.assertTrue(result["addresses"][0]["hasApiKey"])
+
+    def test_bitcoin_wallet_uses_the_blockbook_default(self):
+        xpub = "xpub" + "A" * 107
+        entry = add_address({"chain": "btcwallet", "address": xpub}, self.config)
+        self.assertEqual(entry["endpoint"], "https://btc1.trezor.io")
+        with self.assertRaisesRegex(ValidationError, "private key"):
+            add_address({"chain": "btcwallet", "address": "xprv" + "A" * 107},
+                        self.config)
 
 
 class ProviderParserTests(unittest.TestCase):
@@ -270,6 +293,51 @@ class ProviderParserTests(unittest.TestCase):
         self.assertEqual(snapshot.activities[0].kind, "activity")
 
 
+BLOCKBOOK_RESPONSE = {
+    "balance": "100000",
+    "unconfirmedBalance": "-20000",
+    "txs": 4,
+    "tokens": [{"name": "bc1qown1"}, {"name": "bc1qown2"}],
+    "transactions": [
+        {
+            "txid": "a" * 64,
+            "confirmations": 0,
+            "blockHeight": -1,
+            "blockTime": 0,
+            "vin": [{"addresses": ["bc1qown1"], "value": "25000"}],
+            "vout": [
+                {"addresses": ["bc1qexternal"], "value": "24000"},
+                {"addresses": ["bc1qown2"], "value": "500"},
+            ],
+        },
+        {
+            "txid": "b" * 64,
+            "confirmations": 6,
+            "blockHeight": 100,
+            "blockTime": 1700000000,
+            "vin": [{"addresses": ["bc1qexternal"], "value": "1000"}],
+            "vout": [{"addresses": ["bc1qown1"], "value": "50000"}],
+        },
+        {
+            "txid": "c" * 64,
+            "confirmations": 3,
+            "blockHeight": 99,
+            "blockTime": 1699000000,
+            "vin": [{"addresses": ["bc1qown1"], "value": "10000"}],
+            "vout": [{"addresses": ["bc1qown2"], "value": "10000"}],
+        },
+        {
+            "txid": "d" * 64,
+            "confirmations": 1,
+            "blockHeight": 98,
+            "blockTime": 1698000000,
+            "vin": [{"addresses": ["bc1qexternal"], "value": "1000"}],
+            "vout": [{"addresses": ["bc1qexternal"], "value": "900"}],
+        },
+    ],
+}
+
+
 BLINK_RESPONSE = {
     "data": {
         "me": {
@@ -310,6 +378,68 @@ BLINK_RESPONSE = {
         }
     }
 }
+
+
+class BlockbookProviderTests(unittest.TestCase):
+    entry = {
+        "chain": "btcwallet",
+        "address": "xpub" + "A" * 107,
+    }
+
+    def test_whole_wallet_balance_and_directions(self):
+        with mock.patch("blockwatch.providers.http.request_json",
+                        return_value=BLOCKBOOK_RESPONSE) as request:
+            snapshot = providers._fetch_blockbook(
+                self.entry, providers.CHAINS["btcwallet"])
+        self.assertEqual(snapshot.balance_raw, "80000")
+        self.assertIn("includes unconfirmed balance", snapshot.note)
+        self.assertIn("unconfirmed activity", snapshot.note)
+        self.assertEqual([activity.id for activity in snapshot.activities],
+                         ["a" * 64, "b" * 64, "c" * 64])
+        self.assertEqual(snapshot.activities[0].kind, "out")
+        self.assertEqual(snapshot.activities[0].amount_raw, "24500")
+        self.assertFalse(snapshot.activities[0].confirmed)
+        self.assertEqual(snapshot.activities[1].kind, "in")
+        self.assertEqual(snapshot.activities[1].amount_raw, "50000")
+        self.assertEqual(snapshot.activities[2].kind, "self")
+        self.assertEqual(snapshot.activities[2].amount_raw, "10000")
+        url = request.call_args.args[0]
+        self.assertIn("/api/v2/xpub/", url)
+        self.assertIn("details=txs", url)
+        self.assertIn("tokens=used", url)
+        self.assertIn("pageSize=25", url)
+
+    def test_empty_wallet_is_a_zero_baseline(self):
+        with mock.patch("blockwatch.providers.http.request_json",
+                        return_value={"address": "xpub", "txs": 0}):
+            snapshot = providers._fetch_blockbook(
+                self.entry, providers.CHAINS["btcwallet"])
+        self.assertEqual(snapshot.balance_raw, "0")
+        self.assertEqual(snapshot.activities, [])
+        self.assertEqual(snapshot.note, "")
+
+    def test_default_endpoint_falls_back_on_a_rate_limit(self):
+        with mock.patch("blockwatch.providers.http.request_json",
+                        side_effect=[http.HttpError(429, "rate limited"),
+                                     BLOCKBOOK_RESPONSE]) as request:
+            snapshot = providers._fetch_blockbook(
+                self.entry, providers.CHAINS["btcwallet"])
+        self.assertEqual(snapshot.balance_raw, "80000")
+        urls = [call.args[0] for call in request.call_args_list]
+        self.assertEqual(len(urls), 2)
+        self.assertIn("trezor.io", urls[0])
+        self.assertIn("zelcore.io", urls[1])
+
+    def test_custom_endpoint_is_never_second_guessed(self):
+        entry = dict(self.entry, endpoint="https://blockbook.example.org")
+        with mock.patch("blockwatch.providers.http.request_json",
+                        side_effect=http.HttpError(503, "busy")) as request:
+            with self.assertRaises(http.HttpError):
+                providers._fetch_blockbook(entry,
+                                           providers.CHAINS["btcwallet"])
+        self.assertEqual(request.call_count, 1)
+        self.assertIn("blockbook.example.org",
+                      request.call_args.args[0])
 
 
 class BlinkProviderTests(unittest.TestCase):
@@ -424,6 +554,17 @@ class PollTests(TempFiles):
         self.assertEqual(len(report["events"]), 1)
         self.assertEqual(report["events"][0]["kind"], "in")
         self.assertEqual(report["events"][0]["amount"], "0.000005")
+
+    def test_bitcoin_wallet_poll_shows_one_wallet_balance(self):
+        add_address({"chain": "btcwallet", "address": "xpub" + "A" * 107,
+                     "label": "Main wallet"}, self.config)
+        with mock.patch("blockwatch.watch.fetch",
+                        return_value=Snapshot(balance_raw="100000000")):
+            report = watch.poll(self.config, self.state)
+        row = report["addresses"][0]
+        self.assertEqual(row["chain"], "btcwallet")
+        self.assertEqual(row["balance"], "1")
+        self.assertEqual(row["fiatValue"], "100000.00")
 
     def test_lightning_balance_is_priced_as_btc_and_events_use_sats(self):
         add_address({"chain": "lightning", "address": LIGHTNING_ADDRESS,

@@ -4,4 +4,4 @@
 # private view key that lets a light wallet server see incoming payments).
 # Nothing in this package can build, sign or broadcast a transaction.
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

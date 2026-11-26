@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.ekollof.blockwatch",
   "name": "Blockwatch",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "Emiel Kollof <emiel@kollof.nl>",
   "license": "MIT",
-  "description": "Read-only watch of crypto addresses and a Blink Lightning wallet for new incoming and outgoing transactions, with desktop notifications.",
+  "description": "Read-only watch of crypto addresses, whole Bitcoin wallets by xpub, and a Blink Lightning wallet for new incoming and outgoing transactions, with desktop notifications.",
   "kinds": [
     "bar-widget",
     "service"
@@ -17,7 +17,7 @@
   },
   "barWidget": {
     "displayName": "Blockwatch",
-    "description": "Watch BTC, LTC, DOGE, ETH, SOL and XMR addresses, plus a Blink Lightning wallet, for credit and debit activity",
+    "description": "Watch BTC, LTC, DOGE, ETH, SOL and XMR addresses, whole Bitcoin wallets by xpub, plus a Blink Lightning wallet, for credit and debit activity",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",

@@ -350,6 +350,7 @@ BarWidget {
     case "sol": return "base58 address"
     case "xmr": return "4… (main address)"
     case "lightning": return "name@blink.sv"
+    case "btcwallet": return "xpub… / ypub… / zpub…"
     }
     return ""
   }
@@ -714,7 +715,7 @@ BarWidget {
             model: backend.chains
 
             delegate: Button {
-              text: String(modelData.symbol || "")
+              text: String(modelData.label || modelData.symbol || "")
               tooltipText: String(modelData.name || "")
               selected: root.addChain === modelData.id
               foreground: root.foreground
@@ -895,6 +896,17 @@ BarWidget {
           color: root.addChain === "lightning"
             && !(root.editing && root.editingHasApiKey && !root.editTargetChanged)
             ? Commons.Color.urgent : root.faint
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          visible: root.addChain === "btcwallet"
+          text: strings.t("popup.xpubHint")
+          color: root.faint
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           wrapMode: Text.WordWrap

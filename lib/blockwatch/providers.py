@@ -55,6 +55,8 @@ def fetch(entry):
         raise BlockwatchError("unknown chain in config")
     if chain.provider == "mempool":
         return _fetch_mempool(entry, chain)
+    if chain.provider == "blockbook":
+        return _fetch_blockbook(entry, chain)
     if chain.provider == "blockcypher":
         return _fetch_blockcypher(entry, chain)
     if chain.provider == "blockscout":
@@ -184,6 +186,136 @@ def _mempool_activity(item, address):
         confirmations=confirmations,
         confirmed=confirmed,
         timestamp=timestamp,
+    )
+
+
+# -- Bitcoin: whole wallet from an xpub or descriptor (Blockbook) -----------
+
+# Used only when the entry keeps the default endpoint. A custom endpoint means
+# the user chose one server, and nothing is sent anywhere else.
+BLOCKBOOK_FALLBACKS = ("https://btc1.trezor.io",
+                       "https://blockbook.btc.zelcore.io")
+
+
+def _blockbook_endpoints(entry, chain):
+    configured = (entry.get("endpoint") or "").rstrip("/")
+    if configured and configured != chain.endpoint.rstrip("/"):
+        return [configured]
+    return list(BLOCKBOOK_FALLBACKS)
+
+
+def _blockbook_url(endpoint, wallet):
+    base = endpoint.rstrip("/")
+    if not base.endswith("/api/v2"):
+        base += "/api/v2"
+    url = http.with_query(f"{base}/xpub/{http.path_segment(wallet)}",
+                          "details", "txs")
+    url = http.with_query(url, "pageSize", str(MAX_ACTIVITIES))
+    # "used" returns every derived address with a transaction, not only the
+    # ones that still hold a balance, so outgoing spends can be recognised.
+    return http.with_query(url, "tokens", "used")
+
+
+def _blockbook_document(entry, chain, wallet):
+    endpoints = _blockbook_endpoints(entry, chain)
+    for position, endpoint in enumerate(endpoints):
+        try:
+            return require_dict(
+                http.request_json(_blockbook_url(endpoint, wallet), timeout=30,
+                                  max_bytes=8_000_000),
+                "wallet response")
+        except http.HttpError as error:
+            if error.status in (429, 500, 502, 503, 504) and position + 1 < len(endpoints):
+                continue
+            raise
+    raise BlockwatchError("no Blockbook endpoint answered")
+
+
+def _blockbook_own(out, own):
+    if out.get("isOwn") is True:
+        return True
+    addresses = out.get("addresses")
+    return isinstance(addresses, list) and any(address in own for address in addresses)
+
+
+def _blockbook_activity(tx, own):
+    txid = text(tx.get("txid"), "transaction hash", limit=200)
+    confirmations = int_value(tx.get("confirmations") or 0, "confirmations")
+    confirmed = confirmations > 0
+    timestamp = iso_utc(tx.get("blockTime")) if confirmed else None
+    received = 0
+    spent = 0
+    for output in require_list(tx.get("vout") or [], "outputs", limit=200_000):
+        if isinstance(output, dict) and _blockbook_own(output, own):
+            received += _signed_integer(output.get("value") or 0, "output value")
+    for source in require_list(tx.get("vin") or [], "inputs", limit=200_000):
+        if not isinstance(source, dict):
+            continue
+        addresses = source.get("addresses")
+        if isinstance(addresses, list) and any(address in own for address in addresses):
+            spent += _signed_integer(source.get("value") or 0, "input value")
+    kind, amount = _utxo_kind(received, spent)
+    if kind is None:
+        return None
+    return Activity(
+        id=txid,
+        kind=kind,
+        amount_raw=str(amount),
+        confirmations=confirmations,
+        confirmed=confirmed,
+        timestamp=timestamp,
+        note="pending" if not confirmed else "",
+    )
+
+
+def _fetch_blockbook(entry, chain):
+    wallet = entry["address"]
+    document = _blockbook_document(entry, chain, wallet)
+
+    balance = max(0, _signed_integer(document.get("balance") or 0, "balance"))
+    unconfirmed = _signed_integer(
+        document.get("unconfirmedBalance") or 0, "unconfirmed balance")
+    total = max(0, balance + unconfirmed)
+
+    own = set()
+    for token in require_list(document.get("tokens") or [], "addresses",
+                              limit=200_000):
+        if isinstance(token, dict):
+            name = token.get("name")
+            if isinstance(name, str) and name:
+                own.add(name)
+
+    activities = []
+    pending = 0
+    skipped = 0
+    for tx in require_list(document.get("transactions") or [], "transactions",
+                           limit=100):
+        if not isinstance(tx, dict):
+            continue
+        try:
+            activity = _blockbook_activity(tx, own)
+        except ValidationError:
+            skipped += 1
+            continue
+        if activity is None:
+            continue
+        if not activity.confirmed:
+            pending += 1
+        activities.append(activity)
+
+    notes = []
+    if unconfirmed:
+        notes.append("includes unconfirmed balance")
+    if pending:
+        notes.append("unconfirmed activity")
+    if skipped:
+        notes.append(f"{skipped} transaction(s) could not be read")
+    latest = activities[0].id if activities else ""
+    return Snapshot(
+        balance_raw=str(total),
+        activities=activities[:MAX_ACTIVITIES],
+        fingerprint=_fingerprint(total, document.get("txs"), latest),
+        note=", ".join(notes),
     )
 
 
@@ -447,7 +579,7 @@ BLINK_INITIATION_NOTES = {
 }
 
 
-def _blink_integer(value, what):
+def _signed_integer(value, what):
     """A signed minor-unit amount or epoch, as an int (the API may quote it)."""
     if isinstance(value, bool) or not isinstance(value, (int, str)):
         raise ValidationError(f"{what} is not an integer")
@@ -492,7 +624,7 @@ def _blink_activity(node):
         kind = "out"
     else:
         kind = "activity"
-    amount = abs(_blink_integer(node.get("settlementAmount"), "settlement amount"))
+    amount = abs(_signed_integer(node.get("settlementAmount"), "settlement amount"))
     initiation = node.get("initiationVia")
     type_name = initiation.get("__typename") if isinstance(initiation, dict) else ""
     return Activity(
@@ -522,7 +654,7 @@ def _fetch_blink(entry, chain):
     if wallet is None:
         raise BlockwatchError("this Blink account has no BTC wallet")
 
-    balance = max(0, _blink_integer(wallet.get("balance"), "balance"))
+    balance = max(0, _signed_integer(wallet.get("balance"), "balance"))
     connection = wallet.get("transactions")
     edges = []
     if connection is not None:

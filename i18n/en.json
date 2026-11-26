@@ -49,6 +49,7 @@
   "popup.apiKeyHint": "Create a key at dashboard.blink.sv → API keys with the Read scope only. The key can see history, not send. Blink is custodial and holds the sats.",
   "popup.apiKeyKeep": "Leave blank to keep the stored API key.",
   "popup.apiKeyMissing": "Lightning needs a Blink API key with the Read scope.",
+  "popup.xpubHint": "An xpub or output descriptor follows every address in the wallet, including change. It cannot spend, but it reveals all addresses to the Blockbook server. Never paste an xprv or seed.",
   "popup.rpcHint": "monero-wallet-rpc watches a view-only wallet on your machine. Start it with a public monerod such as xmr-node.cakewallet.com:18081 or node.monerodevs.org:18089.",
   "popup.addAction": "Watch",
   "popup.adding": "Adding…",

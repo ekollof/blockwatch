@@ -10,7 +10,8 @@ var GLYPHS = {
   eth: "󰞻",
   sol: "◎",
   xmr: "󰗹",
-  lightning: "⚡"
+  lightning: "⚡",
+  btcwallet: "󰆬"
 }
 
 function chainGlyph(chain) {

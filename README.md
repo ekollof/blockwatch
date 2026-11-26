@@ -5,9 +5,10 @@
 # Blockwatch
 
 A read-only watch list for the Omarchy bar. Blockwatch watches BTC, LTC,
-DOGE, ETH, SOL and XMR addresses, and a Blink Lightning wallet, and tells you
-when value is credited or debited. It is not a wallet: it holds no spend key,
-cannot sign, and never sends a transaction.
+DOGE, ETH, SOL and XMR addresses, a whole Bitcoin wallet by its xpub, and a
+Blink Lightning wallet, and tells you when value is credited or debited. It is
+not a wallet: it holds no spend key, cannot sign, and never sends a
+transaction.
 
 <p align="center">
   <img src="preview.png" width="420" alt="Blockwatch panel with four fictional watches and USD estimates">
@@ -20,6 +21,8 @@ cannot sign, and never sends a transaction.
 - Checks the watch list on a timer (default every 120 seconds) and on network
   reconnect.
 - Sends a desktop notification for new credit or debit activity.
+- Watches a whole Bitcoin wallet by its **xpub or output descriptor**, so a
+  spend that moves change to a new address does not make the balance drop to 0.
 - Watches a Blink BTC wallet over its read-only API, so Lightning receipts show
   up as sats even though they never touch the on-chain address history.
 - Shows each watched address, its native balance (or, for Monero, the amount
@@ -41,6 +44,7 @@ cannot sign, and never sends a transaction.
 | Chain | Provider | Notes |
 | --- | --- | --- |
 | BTC | [mempool.space](https://mempool.space) | Public transactions; no key needed. |
+| BTC wallet | [Blockbook](https://github.com/trezor/blockbook) | One xpub or descriptor covers every address, including change. See below. |
 | LTC | [litecoinspace.org](https://litecoinspace.org) | mempool.space-compatible API. |
 | DOGE | [BlockCypher](https://www.blockcypher.com) | Free tier; an API token can be configured. |
 | ETH | [Blockscout](https://eth.blockscout.com) | Native ETH transfers only; tokens are not followed. |
@@ -67,10 +71,11 @@ checks the manifest; `omarchy agent look plugin` renders the bar icon.
 ## Add an address
 
 Click the eye, choose **Watch an address**, pick the chain and paste the
-public address. A label is optional. For **sats**, paste your
-`name@blink.sv` and a read-only Blink API key instead of an address. **Click a
-row to edit its label, address, server, Monero mode or Blink key**; the trash
-button stops watching it.
+public address. A label is optional. For **BTC wallet**, paste the account
+xpub or output descriptor instead of an address; for **sats**, paste your
+`name@blink.sv` and a read-only Blink API key. **Click a row to edit its
+label, address, server, Monero mode, Blink key or xpub**; the trash button
+stops watching it.
 
 The same operations are available without the UI:
 
@@ -78,6 +83,7 @@ The same operations are available without the UI:
 BW=~/.config/omarchy/plugins/io.github.ekollof.blockwatch/bin/blockwatch
 
 $BW add --chain btc --address bc1q... --label "Cold storage"
+$BW add --chain btcwallet --address xpub6... --label "Main wallet"
 $BW add --chain eth --address 0x... --label "Treasury"
 $BW add --chain doge --address D...   # set BLOCKWATCH_API_KEY first
 $BW add --chain lightning --address name@blink.sv \
@@ -134,6 +140,42 @@ The helper stores its watch list in `~/.config/blockwatch/config.json`
 (`$XDG_STATE_HOME/blockwatch/state.json`). Both are created with mode `0600`,
 and the directories with `0700`, because a Monero view key or Blink API key is
 a secret.
+
+## Bitcoin: one address or the whole wallet
+
+A watch on a single Bitcoin address shows that address only. An HD wallet uses
+a new address for every payment and sends change to another new address, so a
+single-address watch reads 0 as soon as the wallet spends — even though the
+wallet still holds funds.
+
+The **BTC wallet** watch takes an account **xpub** (or a public output
+descriptor) instead of an address, and asks a Blockbook indexer about the
+whole account: every receive address, every change address, one balance and
+one transaction list. That is the row that behaves like the wallet.
+
+- Export the **account-level** xpub from your wallet: `xpub…` (BIP44),
+  `ypub…` (BIP49) or `zpub…` (BIP84). Testnet `tpub…`, `upub…` and `vpub…`
+  work against a testnet endpoint.
+- Taproot and explicit script types work through a descriptor:
+  `wpkh(xpub…/0/*)`, `tr(xpub…)`, `sh(wpkh(xpub…))` or `pkh(xpub…)`, with
+  optional `[fingerprint/path]` origin and `<0;1>` change selector. Blockbook
+  derives the addresses; Blockwatch sends the descriptor URL-encoded.
+- **Never paste an xprv, yprv, zprv, tprv, uprv or vprv.** Blockwatch refuses
+  these by name. A private key can spend; an xpub cannot.
+- An xpub reveals every address of the wallet to the Blockbook server. The
+  default is Trezor's public instance, with Zelcore's as a fallback when the
+  first is rate-limited; set `endpoint` to your own Blockbook to keep the
+  xpub private. This is a privacy cost, not a spending risk.
+
+The balance includes unconfirmed transactions, like the address watches, and
+the row note says so while a spend or receipt is pending. The BIP scheme is
+inferred from the xpub prefix, so use a `zpub` for a native SegWit account and
+a `wpkh(…)`/`tr(…)` descriptor when the prefix alone is not enough.
+
+```bash
+$BW add --chain btcwallet --address xpub6... --label "Main wallet"
+$BW add --chain btcwallet --address 'tr(xpub6...)' --label "Taproot"
+```
 
 ## Lightning: reading sats from Blink
 
@@ -271,6 +313,13 @@ The panel covers the common case. The config file exposes the rest:
       "endpoint": "https://mempool.space"
     },
     {
+      "id": "btcwallet:xpub6example",
+      "chain": "btcwallet",
+      "address": "xpub6example",
+      "label": "Main wallet",
+      "endpoint": "https://btc1.trezor.io"
+    },
+    {
       "id": "xmr:4example",
       "chain": "xmr",
       "address": "4example",
@@ -317,8 +366,8 @@ Per-address keys:
 
 | Key | Meaning |
 | --- | --- |
-| `chain` | One of `btc`, `ltc`, `doge`, `eth`, `sol`, `xmr`, `lightning`. |
-| `address` | The public address, or the Blink Lightning address (`name@blink.sv`). |
+| `chain` | One of `btc`, `btcwallet`, `ltc`, `doge`, `eth`, `sol`, `xmr`, `lightning`. |
+| `address` | The public address, an xpub/descriptor for `btcwallet`, or the Blink Lightning address (`name@blink.sv`). |
 | `label` | Optional display name, at most 80 characters. |
 | `endpoint` | Optional provider override. HTTPS required, except loopback for wallet RPC. |
 | `viewKey` | Monero private view key (64 hex). Required for `lws`, not for `wallet-rpc`. |
@@ -374,6 +423,10 @@ and native balances continue to update if CoinGecko is unavailable.
 - Transparent chains are queried by address at the provider listed above.
   That reveals which addresses you care about to that provider. Use your own
   endpoint if that matters to you.
+- An xpub is not a spending key, but it links every address of the wallet.
+  Treat it as private data: the Blockbook server can see your whole wallet
+  history, and the default public instances are third parties. Blockwatch
+  refuses xprv/seed material before it reaches the config.
 - A Monero view key is sent only to the configured light wallet server (or
   stays local with `wallet-rpc`). Treat a third-party LWS as you would any
   other service that can see your incoming history.
@@ -435,6 +488,10 @@ real helper/config on exit.
   than a couple of Dogecoin addresses.
 - Fiat values are estimates from a cached CoinGecko spot rate, not accounting
   or tax figures; the native balance is authoritative.
+- `BTC wallet` needs a Blockbook indexer; public instances rate-limit, and the
+  default has one fallback. Set `endpoint` to your own Blockbook for a private
+  and predictable source. Descriptors are limited to `pkh`, `sh(wpkh)`, `wpkh`
+  and `tr` forms.
 - An LWS that has no history for a wallet begins where the server registered
   it. Watching from now on is the normal case; historical backfill is the
   server's business.

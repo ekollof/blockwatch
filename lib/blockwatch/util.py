@@ -182,6 +182,10 @@ _XMR = re.compile(r"^[48][1-9A-HJ-NP-Za-km-z]{94}$")
 _VIEW_KEY = re.compile(r"^[0-9a-fA-F]{64}$")
 _LIGHTNING_LOCAL = re.compile(r"^[a-z0-9._+-]{1,64}$")
 LIGHTNING_DOMAIN = "blink.sv"
+_XPUB = re.compile(r"^(xpub|ypub|zpub|tpub|upub|vpub)[1-9A-HJ-NP-Za-km-z]{100,115}$")
+_PRIVATE_PREFIXES = ("xprv", "yprv", "zprv", "tprv", "uprv", "vprv")
+_DESCRIPTOR_PREFIX = re.compile(r"^(pkh|wpkh|sh\(wpkh|tr)\(")
+_DESCRIPTOR_CHARS = re.compile(r"^[A-Za-z0-9()\[\]{}<>;,:/*'#@._+-]+$")
 
 
 def validate_lightning_address(value):
@@ -203,8 +207,36 @@ def validate_lightning_address(value):
     return f"{local}@{LIGHTNING_DOMAIN}"
 
 
+def validate_wallet_key(value):
+    """An account xpub or output descriptor for a whole Bitcoin wallet.
+
+    A private key is refused by name: a seed or xprv can spend, and pasting
+    one here would put it in the config for no reason. The xpub cannot spend,
+    but it does reveal every address of the wallet to the provider.
+    """
+    value = text(value, "wallet key", limit=400)
+    if any(ch.isspace() for ch in value):
+        raise ValidationError("the wallet key must not contain spaces")
+    if _XPUB.match(value):
+        return value
+    lowered = value.lower()
+    if any(prefix in lowered for prefix in _PRIVATE_PREFIXES):
+        raise ValidationError(
+            "that is a private key; Blockwatch needs the public xpub, never a private key")
+    if not _DESCRIPTOR_PREFIX.match(lowered):
+        raise ValidationError(
+            "not a Bitcoin xpub or output descriptor (xpub, ypub, zpub, wpkh(...), tr(...))")
+    if len(value) > 400:
+        raise ValidationError("the output descriptor is too long")
+    if not _DESCRIPTOR_CHARS.match(value):
+        raise ValidationError("the output descriptor contains unexpected characters")
+    if value.count("(") != value.count(")"):
+        raise ValidationError("the output descriptor has unbalanced parentheses")
+    return value
+
+
 def validate_address(chain, address):
-    address = text(address, "address", limit=200)
+    address = text(address, "address", limit=400 if chain == "btcwallet" else 200)
     if chain == "btc":
         if _BECH32.match(address.lower()):
             return address
@@ -235,6 +267,8 @@ def validate_address(chain, address):
         raise ValidationError("not a Monero mainnet address")
     if chain == "lightning":
         return validate_lightning_address(address)
+    if chain == "btcwallet":
+        return validate_wallet_key(address)
     raise ValidationError(f"unsupported chain {chain}")
 
 

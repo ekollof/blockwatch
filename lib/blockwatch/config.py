@@ -43,6 +43,8 @@ class Chain:
     # Some units are not a CoinGecko coin of their own (sats is BTC/1e8).
     rate_symbol: str = ""
     rate_decimals: int = -1
+    # Optional short text for the chain picker when the symbol is ambiguous.
+    button_label: str = ""
 
 
 CHAINS = {
@@ -50,6 +52,12 @@ CHAINS = {
     for chain in (
         Chain("btc", "Bitcoin", "BTC", 8, "mempool", "https://mempool.space",
               note="Public transactions; no key needed."),
+        Chain("btcwallet", "Bitcoin wallet", "BTC", 8, "blockbook",
+              "https://btc1.trezor.io",
+              note="An xpub or output descriptor watches every address in the "
+                   "wallet, including change. Read-only, but it reveals all "
+                   "addresses to the Blockbook server.",
+              button_label="BTC wallet"),
         Chain("ltc", "Litecoin", "LTC", 8, "mempool", "https://litecoinspace.org",
               note="Public transactions; no key needed."),
         Chain("doge", "Dogecoin", "DOGE", 8, "blockcypher",
@@ -578,6 +586,7 @@ def chain_list():
             "id": chain.id,
             "name": chain.name,
             "symbol": chain.symbol,
+            "label": chain.button_label or chain.symbol,
             "decimals": chain.decimals,
             "needsViewKey": chain.needs_view_key,
             "needsApiKey": chain.needs_api_key,
