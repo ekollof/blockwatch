@@ -170,6 +170,13 @@ one transaction list. That is the row that behaves like the wallet.
 The balance includes unconfirmed transactions, like the address watches, and
 the row note says so while a spend or receipt is pending.
 
+Spending or trading does not invalidate the published receive address, and it
+does not require a new watch: the address keeps accepting donations and the
+xpub watch keeps counting them. Reusing one address is a privacy choice, not a
+technical limit — it links every donation publicly. Fresh addresses per donor
+(or an xpub-based donation page) are better for privacy, and the wallet watch
+already covers them.
+
 ### If a bare xpub shows 0
 
 Blockbook infers the BIP scheme from the key's SLIP-132 prefix: `zpub` is
