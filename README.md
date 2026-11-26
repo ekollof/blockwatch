@@ -168,12 +168,31 @@ one transaction list. That is the row that behaves like the wallet.
   xpub private. This is a privacy cost, not a spending risk.
 
 The balance includes unconfirmed transactions, like the address watches, and
-the row note says so while a spend or receipt is pending. The BIP scheme is
-inferred from the xpub prefix, so use a `zpub` for a native SegWit account and
-a `wpkh(…)`/`tr(…)` descriptor when the prefix alone is not enough.
+the row note says so while a spend or receipt is pending.
+
+### If a bare xpub shows 0
+
+Blockbook infers the BIP scheme from the key's SLIP-132 prefix: `zpub` is
+BIP84, `ypub` is BIP49, and `xpub` is BIP44. Many wallets export a **BIP84
+account as a plain `xpub`**, so Blockbook derives legacy `1…` addresses and
+reports 0 even though the wallet holds funds. Wrap the same xpub in the
+descriptor that matches the addresses your wallet shows:
+
+| Addresses start with | Descriptor |
+| --- | --- |
+| `bc1q…` (native SegWit, BIP84) | `wpkh(xpub…)` |
+| `3…` (wrapped SegWit, BIP49) | `sh(wpkh(xpub…))` |
+| `bc1p…` (taproot, BIP86) | `tr(xpub…)` |
+| `1…` (legacy, BIP44) | bare `xpub…`, or `pkh(xpub…)` |
+
+Wrapping does not change the key or send anything extra; it only tells the
+indexer which script type to derive. A wallet that exports `zpub` or `ypub`
+already carries that information and can be pasted as-is. Blockwatch also puts
+this hint in the row when a bare xpub reports 0.
 
 ```bash
 $BW add --chain btcwallet --address xpub6... --label "Main wallet"
+$BW add --chain btcwallet --address 'wpkh(xpub6...)' --label "Native SegWit"
 $BW add --chain btcwallet --address 'tr(xpub6...)' --label "Taproot"
 ```
 

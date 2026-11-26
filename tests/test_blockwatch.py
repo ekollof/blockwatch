@@ -416,7 +416,17 @@ class BlockbookProviderTests(unittest.TestCase):
                 self.entry, providers.CHAINS["btcwallet"])
         self.assertEqual(snapshot.balance_raw, "0")
         self.assertEqual(snapshot.activities, [])
-        self.assertEqual(snapshot.note, "")
+        self.assertIn("use wpkh(xpub", snapshot.note)
+
+    def test_empty_descriptor_wallet_has_no_bip44_hint(self):
+        entry = dict(self.entry,
+                     address="wpkh(" + self.entry["address"] + ")")
+        with mock.patch("blockwatch.providers.http.request_json",
+                        return_value={"address": "wpkh", "txs": 0}):
+            snapshot = providers._fetch_blockbook(
+                entry, providers.CHAINS["btcwallet"])
+        self.assertEqual(snapshot.balance_raw, "0")
+        self.assertNotIn("wpkh(xpub", snapshot.note)
 
     def test_default_endpoint_falls_back_on_a_rate_limit(self):
         with mock.patch("blockwatch.providers.http.request_json",

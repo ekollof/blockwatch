@@ -304,6 +304,12 @@ def _fetch_blockbook(entry, chain):
         activities.append(activity)
 
     notes = []
+    if total == 0 and not wallet.startswith(("pkh(", "wpkh(", "sh(", "tr(")):
+        # A SLIP-132 prefix (zpub/ypub) carries the script type; a plain xpub
+        # does not, and Blockbook falls back to BIP44. Native SegWit wallets
+        # often export a BIP84 account as a plain xpub, which then shows 0.
+        notes.append("0 balance: a bare xpub is read as BIP44; "
+                     "for bc1q addresses use wpkh(xpub…)")
     if unconfirmed:
         notes.append("includes unconfirmed balance")
     if pending:
